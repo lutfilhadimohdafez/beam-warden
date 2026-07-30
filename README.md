@@ -31,13 +31,18 @@ Client <--beamforming--> OpenWrt Router --telemetry--> ML Engine --score--> Dash
 4. On detection: alert (LuCI dashboard + Telegram), with optional
    auto-mitigation (isolate/block the suspect MAC).
 
-## Objectives
+## Objectives — status
 
-1. Replicate a BeamCraft-style forged-BFI attack — ≥51% attack success rate.
-2. Automate PHY telemetry collection (throughput, RSSI) — ≥10 samples,
-   ≥15% variance detected between normal and attack states.
-3. Integrate an ML anomaly detection engine into OpenWrt as a standalone
-   package — ≥55% detection accuracy.
+1. **Replicate** a BeamCraft-style forged-BFI attack — ≥51% attack success
+   rate. `BeamCraft_AE/main_su` compiles clean; `tools/attack_gui.py` can
+   scan for a monitor-capable NIC, set monitor mode, and launch it. **Not
+   yet run against real hardware** (no Alfa AWUS036ACM attached yet).
+2. **Automate** PHY telemetry collection (throughput, RSSI) — ≥10 samples,
+   ≥15% variance detected between normal and attack states. **Not started**
+   — blocked on Objective 1's hardware run to generate attack-state data.
+3. **Integrate** an ML anomaly detection engine into OpenWrt — ≥55%
+   detection accuracy. **Not started** — Isolation Forest (scikit-learn),
+   design only so far (see proposal Appendix 16.1).
 
 ## Stack
 
@@ -49,12 +54,28 @@ Client <--beamforming--> OpenWrt Router --telemetry--> ML Engine --score--> Dash
 | Dashboard | OpenWrt LuCI |
 | Alerts | Telegram bot |
 
+## Tools
+
+- `tools/attack_gui.py` — Tkinter control panel for the SU (single-user)
+  attack: scans WiFi adapters for monitor-mode support, sets a chosen NIC
+  into monitor mode on a given channel, patches `BeamCraft_AE/main_su.cpp`
+  with the interface/AP MAC/victim MAC/alpha you enter, recompiles it, and
+  runs it — all via one `pkexec` prompt. MU (multi-user) mode isn't wired
+  in yet (its packet filter targets up to 5 MACs vs SU's 2).
+  Run: `python3 tools/attack_gui.py`.
+- `tools/test_attack_gui.py` — sanity checks for the source-patching and
+  hardware-parsing logic above (`python3 tools/test_attack_gui.py`).
+
 ## Repo layout
 
 - `the project proposal` — full project proposal (problem statement,
   feasibility study, specs, Gantt chart, costing).
-- `BeamCraft_AE/`, `BFM-tool/` — external reference repos (gitignored, not
-  part of this project's own history).
+- `beamcraft_attack (1).pdf` — the BeamCraft paper (IEEE TMC 2026) this
+  project's attack replicates; see references below.
+- `tools/` — our own scripts (tracked; see above).
+- `BeamCraft_AE/`, `BFM-tool/` — external reference repos, cloned as-is
+  (gitignored, not part of this project's own git history). `BeamCraft_AE`
+  is the attack implementation; `BFM-tool` captures/plots raw BFI packets.
 
 ## Team
 
