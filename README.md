@@ -14,6 +14,9 @@ using a machine learning model (Isolation Forest) trained on router telemetry
 (RSSI, MCS, retry rate) to flag anomalous beamforming behaviour in real time,
 without needing to touch the Wi-Fi protocol itself.
 
+📡 [Project Overview](https://coldcollectives.my/projects/beam-warden.html) ·
+📖 [Tooling Manual](https://coldcollectives.my/projects/beam-warden-docs.html)
+
 ## How it works
 
 ```
@@ -38,8 +41,10 @@ Client <--beamforming--> OpenWrt Router --telemetry--> ML Engine --score--> Dash
    scan for a monitor-capable NIC, set monitor mode, and launch it. **Not
    yet run against real hardware** (no Alfa AWUS036ACM attached yet).
 2. **Automate** PHY telemetry collection (throughput, RSSI) — ≥10 samples,
-   ≥15% variance detected between normal and attack states. **Not started**
-   — blocked on Objective 1's hardware run to generate attack-state data.
+   ≥15% variance detected between normal and attack states. **Tooling
+   built, zero data collected yet** — `tools/telemetry_capture.py` logs
+   RSSI/MCS/throughput/retry-rate to CSV, but needs Objective 1's hardware
+   run to actually produce normal-vs-attack samples.
 3. **Integrate** an ML anomaly detection engine into OpenWrt — ≥55%
    detection accuracy. **Not started** — Isolation Forest (scikit-learn),
    design only so far (see proposal Appendix 16.1).
@@ -65,6 +70,14 @@ Client <--beamforming--> OpenWrt Router --telemetry--> ML Engine --score--> Dash
   Run: `python3 tools/attack_gui.py`.
 - `tools/test_attack_gui.py` — sanity checks for the source-patching and
   hardware-parsing logic above (`python3 tools/test_attack_gui.py`).
+- `tools/telemetry_capture.py` — polls `iw station dump` on the router over
+  SSH and logs RSSI/MCS/throughput/retry-rate per client to CSV, labelled
+  `normal`/`attack` for the Objective 2 dataset.
+  Run: `python3 tools/telemetry_capture.py --host <router-ip> --iface wlan0 --label normal`.
+- `tools/test_telemetry_capture.py` — checks the parsing/delta math against
+  two real `iw station dump` snapshots (`python3 tools/test_telemetry_capture.py`).
+- Full usage guide: [Beam Warden Tooling Manual](https://coldcollectives.my/projects/beam-warden-docs.html)
+  — setup, CLI reference, end-to-end workflow, known limitations.
 
 ## Repo layout
 
