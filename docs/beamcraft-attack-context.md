@@ -117,3 +117,27 @@ Fields below are from `iwpriv <if> stat` on the GN630v (see `docs/hardware/gn630
 
 The retry-flag mechanism is the strongest physics-grounded feature: BeamCraft *must* set the retry
 bit, which directly spikes the AP's retransmission/PER counters we already read live.
+
+### 6a. Per-STA divergence — a plunder-specific fingerprint
+
+Disruption and plunder look different in **per-station** telemetry, and that difference discriminates
+the two attack classes:
+
+- **Disruption:** the victim's stream is nulled -> victim MCS/SNR/throughput crater, and **no client gains.**
+  The signature is one-sided degradation.
+- **Plunder:** the AP stops nulling interference toward the victim, so within the *same sounding cycle*
+  the **beneficiary's MCS/SNR climbs while the victim's craters.** The signature is a **simultaneous
+  opposite-direction divergence** between two associated stations.
+
+```
+   sounding cycle t:      MCS / SNR
+     BENEFICIARY (attacker)   ^  climbs (interference-free, +throughput)
+     VICTIM                   v  craters (misdirected stream, SINR ~0)
+```
+
+To observe this the collector must read **per-STA** stats, not just per-BSS `stat`. On the GN630v that
+means `iwpriv <if> show stainfo` / `get_mac_table`, whose output lands in **dmesg / the kernel ring
+buffer, not stdout** (see recon doc) — so the agent issues the command then reads `dmesg`/`/dev/kmsg`.
+Per-BSS `stat` alone catches disruption (aggregate degradation) but can miss plunder, since one client
+rising and one falling can partially cancel in the aggregate. **Per-STA divergence is therefore the
+feature that separates plunder from disruption** and should be in the labelled dataset for Objective 3.
