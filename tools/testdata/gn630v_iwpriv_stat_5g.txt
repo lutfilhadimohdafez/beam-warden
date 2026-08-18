@@ -1,0 +1,32 @@
+rai1      stat:
+CurrentTemperature              = 55
+Tx success                      = 534
+Tx fail count                   = 309, PER=36.6%
+Current BW Tx count             = 343
+Other BW Tx count               = 500
+Rx success                      = 4496
+Rx with CRC                     = 1730, PER=27.7%
+Rx drop due to out of resource  = 53
+Rssi: -63 -69 -109 -109 
+CN Info:                                = 0
+Last TX Rate                                    = NSS2_MCS2, BW80, 0.8us GI, HE_SU, LDPC
+Last RX Rate                                    = NSS2_MCS3, BW80, 0.8us GI, HE_SU, LDPC
+WPS Wsc2MinsTimerRunning(rai0)          = 0
+WPS Wsc2MinsTimerRunning(rai1)          = 0
+WPS Wsc2MinsTimerRunning(rai2)          = 0
+WPS Wsc2MinsTimerRunning(rai3)          = 0
+WPS Wsc2MinsTimerRunning(rai4)          = 0
+WPS Wsc2MinsTimerRunning(rai5)          = 0
+WPS Wsc2MinsTimerRunning(rai6)          = 0
+WPS Wsc2MinsTimerRunning(rai7)          = 0
+Packets Received       = 8403
+Packets Sent           = 2104
+Bytes Received         = 309069
+Bytes Sent             = 315849
+
+proxy arp enable              = 0
+WNMNotify enable              = 0
+WNM BSS Transition Management enable = 1
+GAS come back delay                       = 0
+GAS MMPDU size                            = 0
+GAS enable                              = 1
