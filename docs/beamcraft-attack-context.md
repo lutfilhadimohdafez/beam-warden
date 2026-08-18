@@ -141,3 +141,37 @@ buffer, not stdout** (see recon doc) — so the agent issues the command then re
 Per-BSS `stat` alone catches disruption (aggregate degradation) but can miss plunder, since one client
 rising and one falling can partially cancel in the aggregate. **Per-STA divergence is therefore the
 feature that separates plunder from disruption** and should be in the labelled dataset for Objective 3.
+
+## 7. How the forged BFI matrix is built (attack side)
+
+The BFI carries a **compressed feedback matrix V** (quantized Givens-rotation angles phi/psi)
+plus an **average SNR** per stream. BeamCraft modifies the *matrix*, not the SNR (forging SNR alone
+barely moves traffic — paper Fig 4). This all runs on the **Alfa NIC** (monitor+inject); the code is
+`BeamCraft_AE/main_su.cpp` (disruption) and `main_mu.cpp` (plunder).
+
+```
+  1. SNIFF        Alfa (monitor) captures a genuine BFI action frame off-air
+        |
+        v
+  2. DECOMPRESS   BFI Givens angles (phi, psi)  -->  feedback matrix V  (Mt x Mr)
+        |                                            + avg SNR  (left untouched)
+        v
+  3. FORGE MATRIX   compute V^f from V, dialed by rho in [0,1]:
+        |             disruption:  V^f = sqrt(1 - rho^2) * V_perp  +  rho * V
+        |                          V_perp is orthogonal to V (Gram-Schmidt / nullspace)
+        |                          rho = 1 -> genuine (no attack);  rho -> 0 -> beam into a null
+        |             plunder:     V^f made orthogonal to the BENEFICIARY's channel
+        |                          -> AP stops nulling interference -> beneficiary SINR jumps
+        v
+  4. RECOMPRESS   V^f --> Givens angles --> repack into a BFI frame
+        |            spoof VICTIM MAC, reuse dialog token + seq, set RETRY = 1
+        v
+  5. INJECT       Alfa transmits forged BFI --> AP accepts it (retry) over the genuine one
+                  --> AP beamforms the victim's data the wrong way
+```
+
+**The one knob is `rho`** (`rho^f` in the paper): the correlation between the forged and genuine
+matrix. `rho = 1` is a no-op; `rho -> 0` is maximum misdirection. Sweeping `rho` dials attack
+strength (reduction rate rises as `rho` falls — paper Fig 11d), which is how the **attack class**
+gets graded intensities for the dataset. In our testbed the GN630v is the AP; the degradation this
+forgery causes is exactly what `tools/gn630v_telemetry.py --label attack` records.
