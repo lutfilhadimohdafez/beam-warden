@@ -126,6 +126,17 @@ Feature vector for the ML engine:
 instantaneously. Same diff pattern as `tools/telemetry_capture.py` (built for OpenWrt
 `iw station dump`) — needs a **GN630v/`iwpriv stat` parser adapter**.
 
+**Per-STA schema** (verified via `iwpriv <if> show stainfo` -> dmesg; columns present even when no
+STA is associated). This is the richest feature set — one row per associated client:
+
+```
+MAC  MODE  AID  WCID  BSS  PSM  WMM  MIMOPS  RSSI0/1/2/3  PhMd(T/R)  BW(T/R)  MCS(T/R)  SGI(T/R)  STBC(T/R)  Idle  Rate(T/R)
+```
+
+Per-client features: **`RSSI0/1/2/3`** (per-chain, per-STA), **`MCS(T/R)`**, `PhMd`/`BW`/`SGI`/`STBC`
+(rate mode), `Idle`, `Rate(T/R)`. Enables the plunder vs disruption discrimination (per-STA divergence,
+see `docs/beamcraft-attack-context.md` §6a).
+
 Collector gotchas (verified):
 - `iwpriv <if> show stainfo` / `get_mac_table` print to **dmesg/kernel ring buffer, not stdout** —
   only needed for per-STA breakdown with multiple clients; per-BSS `stat` suffices for single STA.
