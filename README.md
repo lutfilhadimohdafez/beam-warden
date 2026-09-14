@@ -1,142 +1,294 @@
-# Beam Warden: Beamforming Anomaly Detection Framework
+# Beam Warden — Beamforming (BFI) Spoofing Attack & Detection
 
 **Final Year Project**
 
-Modern Wi-Fi (802.11ac/ax/be) relies on beamforming to steer signal toward each
-client. The channel feedback that makes this possible — Beamforming Feedback
-Information (BFI) — is sent in **cleartext with no authentication**, even
-under WPA3/PMF. An attacker with commodity hardware can forge BFI and quietly
-redirect an access point's beams, cutting a victim's throughput by up to 83%
-(the "BeamCraft" attack).
+Modern Wi-Fi (802.11n/ac/ax/be) steers signal toward each client using
+**beamforming**. To do it, every client tells the access point how to aim — it
+sends **Beamforming Feedback Information (BFI)**, a compressed description of the
+wireless channel. Critically, **BFI is transmitted in cleartext with no
+authentication or integrity protection — even under WPA3/PMF.** An attacker with
+a commodity Wi-Fi adapter can capture a victim's BFI, forge a malicious version,
+and inject it as if it came from the victim — hijacking the AP's beam and cutting
+the victim's throughput by up to **83%** (the *BeamCraft* attack).
 
-**Beam Warden** replicates that attack in a controlled lab, then detects it —
-using a machine learning model (Isolation Forest) trained on router telemetry
-(RSSI, MCS, retry rate) to flag anomalous beamforming behaviour in real time,
-without needing to touch the Wi-Fi protocol itself.
+**Beam Warden** (1) replicates that attack against real hardware, and (2) detects
+it from router PHY telemetry using an unsupervised ML model (Isolation Forest) —
+without touching the Wi-Fi protocol itself.
 
-📡 [Project Overview](https://coldcollectives.my/projects/beam-warden.html) ·
-📖 [Tooling Manual](https://coldcollectives.my/projects/beam-warden-docs.html)
+---
 
-## How it works
+## Status at a glance
+
+| # | Objective | Target | Status |
+|---|-----------|--------|--------|
+| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **injection proven 30/30 on real target**; forge step pending HE port (see §6) |
+| 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — 150-sample normal dataset + live dashboard |
+| 3 | ML anomaly detection | ≥55% accuracy | 🟡 designed (Isolation Forest); unblocks after Obj-1 attack data |
+
+**Proven on hardware this cycle:** the attacker (Alfa AWUS036ACM) injects crafted
+802.11 frames onto the target's channel (30/30 ACKs); the target (Skyworth GN630v,
+MediaTek MT7916) emits real beamforming feedback we capture live; that feedback
+is **802.11ax (HE)**, which pins down the exact remaining work (§6).
+
+---
+
+## 1. What beamforming is (and why BFI exists)
+
+To transmit to a client, the AP (the *beamformer*) shapes its antenna signals so
+they add up **in phase** at the client — a focused beam instead of a
+broadcast. To know how to aim, it needs the **channel** `H` between its antennas
+and the client's. The client (the *beamformee*) measures `H` and feeds back the
+optimal steering matrix `V`. This exchange is **channel sounding**:
 
 ```
-Client <--beamforming--> OpenWrt Router --telemetry--> ML Engine --score--> Dashboard/Alerts
-                              ^
-                    Attacker forges BFI
+        (1) Null Data Packet Announcement + NDP (known training fields)
+   AP  ───────────────────────────────────────────────────────────────►  CLIENT
+ (beamformer)                                                        (beamformee)
+        │                                                                 │
+        │                                    (2) estimate channel H,      │
+        │                                        SVD → steering matrix V, │
+        │                                        COMPRESS V → angles φ,ψ  │
+        │                                                                 │
+   AP  ◄───────────────────────────────────────────────────────────────  CLIENT
+        (3) Compressed Beamforming Report  =  the BFI  (cleartext!)
+        │
+        │  (4) AP rebuilds V from the angles, pre-codes the next
+        ▼      downlink transmission → beam aimed at the client
 ```
 
-1. An OpenWrt-based router collects PHY telemetry (RSSI, MCS, retry rate) from
-   connected clients.
-2. Telemetry is sent to an external ML engine (Isolation Forest, trained
-   unsupervised on 24–72h of normal traffic).
-3. The engine scores each device for anomalous behaviour and returns a
-   verdict to the router's dashboard.
-4. On detection: alert (LuCI dashboard + Telegram), with optional
-   auto-mitigation (isolate/block the suspect MAC).
+The report in step 3 is what an attacker sniffs and forges.
 
-## Objectives — status
+---
 
-1. **Replicate** a BeamCraft-style forged-BFI attack — ≥51% attack success
-   rate. `BeamCraft_AE/main_su` compiles clean; `tools/attack_gui.py` can
-   scan for a monitor-capable NIC, set monitor mode, and launch it. **Not
-   yet run against real hardware** (no Alfa AWUS036ACM attached yet).
-2. **Automate** PHY telemetry collection (throughput, RSSI) — ≥10 samples,
-   ≥15% variance detected between normal and attack states. **Live on real
-   hardware.** A Skyworth **GN630v** ONT (MediaTek MT7916, `su_bf`/`mu_bf`)
-   is the telemetry sensor: `tools/gn630v_telemetry.py` telnets in and polls
-   `iwpriv <if> stat`, logging RSSI/MCS/throughput/retry-rate to CSV. First
-   `normal`-class dataset captured under live iperf3 load (see **Dataset**).
-3. **Integrate** an ML anomaly detection engine into OpenWrt — ≥55%
-   detection accuracy. **Not started** — Isolation Forest (scikit-learn),
-   design only so far (see proposal Appendix 16.1).
+## 2. Beamforming across Wi-Fi versions
 
-## Dataset
+The **feedback mechanism is the same family** across generations — only the
+parameters change. This is *why a single, parametrized decoder works everywhere.*
 
-Telemetry is captured off the GN630v (the AP/victim) and labelled by class.
-The Isolation Forest (Objective 3) trains on the **normal** class and flags
-deviations; the **attack** class is held out to measure detection accuracy.
+| Standard | Wi-Fi | Beamforming | Data subcarriers `Nsc` (20/40/80/160 MHz) | SU angles `b_φ`/`b_ψ` | MU angles `b_φ`/`b_ψ` | Report container |
+|---|---|---|---|---|---|---|
+| 802.11n  | 4 | optional (rarely deployed) | 56 / 114 / – / – | — | — | HT (uncommon) |
+| 802.11ac | 5 | **explicit SU + MU (VHT)** | 52 / 108 / 234 / 468 | 6 / 4 | 9 / 7 | **VHT** MIMO Control |
+| 802.11ax | 6/6E | **explicit SU+MU (HE)**, trigger-based | 242 / 484 / **996** / 1992 (RU-grouped) | 6 / 4 | 9 / 7 | **HE** MIMO Control |
+| 802.11be | 7 | explicit (EHT), up to 320 MHz | up to 4×996 | 6 / 4 | 9 / 7 | **EHT** MIMO Control |
 
-| File | Class (`label`) | Conditions |
+**Invariant across versions** (reusable in one decoder):
+- the compression algorithm (Givens rotations, §3),
+- the **angle codebook bit-widths** — SU = `φ:6, ψ:4`; MU = `φ:9, ψ:7`
+  (a function of SU/MU, **not** of the Wi-Fi generation),
+- the **order** of angles for a given antenna geometry `Nr×Nc` (§3, Table).
+
+**Changes across versions** (what a port must re-parametrize):
+- **`Nsc`** — the subcarrier count (bandwidth-dependent, and HE/EHT apply
+  *sub-carrier grouping* `Ng` ∈ {4,16} to shrink it),
+- the **frame container** — VHT vs HE vs EHT MIMO-Control field layout & offset,
+- SU-vs-MU selection (sets the bit-widths above).
+
+---
+
+## 3. The math: how BFI is decoded
+
+**Step A — channel to steering matrix (at the beamformee).** For each subcarrier
+`k`, the estimated channel `Hₖ` (size `M×N`, M=tx antennas, N=rx antennas) is
+decomposed by SVD:
+
+```
+    Hₖᵀ = Uₖ · Sₖ · Zₖᴴ          →     Vₖ = first Nss columns of Zₖ   (M × Nss)
+```
+
+`Vₖ` is the steering matrix the AP needs. Sending it as raw complex numbers is
+expensive, so 802.11 **compresses** it into real **angles**.
+
+**Step B — compress V into angles (Givens rotations).** `Vₖ` is factored into a
+product of diagonal phase matrices `Dₖ,ᵢ` (carrying **φ** angles) and Givens
+rotation matrices `Gₖ,ℓ,ᵢ` (carrying **ψ** angles):
+
+```
+            ┌ min(Nss, M−1)          M                    ┐
+    Ṽₖ  =   │      ∏        ( Dₖ,ᵢ ·  ∏  Gₖ,ℓ,ᵢᵀ )        │ · I(M×Nss)
+            └     i=1               ℓ=i+1                  ┘
+
+    Dₖ,ᵢ = diag(1,…, e^{jφ}, …, 1)     Gₖ,ℓ,ᵢ = rotation by ψ in the (i,ℓ) plane
+```
+
+Only the `φ` and `ψ` angles are transmitted — the beamformer reconstructs `Vₖ`
+from them exactly (the last row of `Ṽ` is real by construction, so it's dropped).
+
+**Step C — quantize the angles.** Each angle is packed into a fixed number of bits
+(`b_φ` for φ, `b_ψ = b_φ − 2` for ψ):
+
+```
+    φ = π · ( 1/2^(b_φ−1) + q_φ / 2^(b_φ) )        q_φ ∈ {0 … 2^(b_φ)−1}
+    ψ =     ( 1/2^(b_ψ+2) + q_ψ / 2^(b_ψ+1) )      q_ψ ∈ {0 … 2^(b_ψ)−1}
+```
+
+**Number & order of angles** depend only on the antenna geometry `Nr×Nc`:
+
+| Nr×Nc | #angles | Order (as packed in the report) |
 |---|---|---|
-| `data/normal_iperf.csv` | **`normal`** (benign baseline) | Legitimate traffic, iPhone on 5G, live iperf3 load, **no attack** |
-| _(next)_ `data/attack_*.csv` | **`attack`** | Same link **while BeamCraft forges BFI** (Objective 1 rig) |
+| 2×1 | 2  | φ11, ψ21 |
+| 2×2 | 2  | φ11, ψ21 |
+| 3×2 | 6  | φ11, φ21, ψ21, ψ31, φ22, ψ32 |
+| 4×2 | 10 | φ11, φ21, φ31, ψ21, ψ31, ψ41, φ22, φ32, ψ32, ψ42 |
+| 4×4 | 12 | φ11, φ21, φ31, ψ21, ψ31, ψ41, φ22, φ32, ψ32, ψ42, φ33, ψ43 |
 
-`data/normal_iperf.csv` is the **normal / benign baseline class** — a real
-5-minute capture at 2 s intervals. Under load its fingerprint is high
-throughput (~98 Mbps), low PER (~14%), steady MCS, retry-rate ~0.14. The
-attack class inverts these (throughput collapses, PER/retry spike, MCS drops).
+**Decoding (reverse of B+C)** — what our tooling and the attack do:
 
-### What metrics we take (detection pipeline)
+```
+   raw BFI bytes ─► bit-unpack (b_φ, b_ψ) ─► angles φ,ψ  ─►  rebuild Dₖ,ᵢ, Gₖ,ℓ,ᵢ
+                                                          ─►  Vₖ = ∏ D·Gᵀ   (per subcarrier)
+```
+
+This is the algorithm implemented in `BeamCraft_AE/main_su.cpp :: re_beamforming()`
+(VHT) and, identically, in the **Wi-BFI** reference (HE) — same rotations, only
+`Nsc`, the bit-widths, and the frame offset differ per §2.
+
+---
+
+## 4. The attack: forging BFI (BeamCraft)
+
+Because the AP blindly trusts the most recent report "from the victim", an
+attacker who can hear a report and transmit can **substitute a malicious one**:
+
+```
+ ① sniff victim's compressed report ──► ② decode angles → rebuild TRUE Vₖ (§3)
+                                                     │
+                                                     ▼
+ ④ inject forged report              ◄── ③ craft Wₖ  ⟂  Vₖ  (Gram–Schmidt on a
+    (src MAC = victim, so the AP           random matrix), then blend:
+    accepts it as the victim's)               Wₖ = √(1−α)·Vₖ + √α·Wₖ,orth
+                                                     │
+                                                     ▼
+                              AP pre-codes with Wₖ instead of Vₖ →
+                              energy steered AWAY from the victim →
+                              victim SNR / throughput collapses
+```
+
+`α` (0…1) tunes the attack: `α=1` = fully orthogonal = maximum disruption;
+`α=0` = honest feedback (no attack); `0<α<1` = a covert, partial degradation.
+`main_su` = single-user **disruption**; the MU **plunder** variant (steer toward
+the attacker) is future work.
+
+**Why it works:** the report carries no signature and the attacker spoofs the
+source MAC — nothing in 802.11 lets the AP tell a forged report from a real one.
+
+---
+
+## 5. System architecture (attack + detection)
+
+```
+ ┌──────────────┐   beamformed 5 GHz    ┌───────────────────────────┐
+ │  VICTIM STA  │◄─────── downlink ─────►│  GN630v AP  (MT7916)      │
+ │ (beamformee) │   ──BFI (cleartext)──► │  SU/MU beamforming, ch48  │
+ └──────────────┘                        └────────────┬──────────────┘
+        ▲                                              │ iwpriv rai1 stat
+        ╎ ① sniff BFI  ② forge  ③ inject               │ (telnet, 2 s poll)
+        ╎  (forged report, spoofed as victim)          ▼
+ ┌──────┴───────────────────┐              ┌───────────────────────────┐
+ │ ATTACKER  (Alfa MT7921)  │              │  TELEMETRY + ML (this PC) │
+ │ monitor+inject on mon0   │              │  collector → dashboard    │
+ │ main_su (BeamCraft SU)   │              │  → Isolation Forest → 🚨  │
+ └──────────────────────────┘              └───────────────────────────┘
+```
+
+---
+
+## 6. Gate 2 finding — the target speaks HE, not VHT
+
+First live capture (`data/bfi_he_capture.pcap`): **171 compressed beamforming
+reports** from the victim → GN630v, **action category 30 = HE (802.11ax)**,
+~277-byte frames, on channel 48. See `docs/gate2-bfi-findings.md`.
+
+**Consequence:** the reference `main_su.cpp` decodes a **VHT** report; the target
+emits **HE**. Per §2/§3 the *algorithm* is identical — the port only re-parametrizes:
+
+| Parameter | `main_su` (VHT 20 MHz) | GN630v (HE 80 MHz) | Action |
+|---|---|---|---|
+| Subcarriers `Nsc` | 52 | ~242 (grouped) | **change `NST` + Eigen dims** |
+| SU angle bits `φ/ψ` | 6 / 4 | 6 / 4 (if SU) | keep — **confirm SU vs MU** |
+| Angle order (`Nr×Nc`) | 4×2 → 10 | read from HE MIMO Control | confirm geometry |
+| Report offset | `len_head+7` (VHT) | HE: 1+1+5+2 hdr fields | **recompute** |
+
+**Fast path:** [Wi-BFI](https://github.com/kfoysalhaque/Wi-BFI) (open-source, pip)
+already parses HE BFAs — feed it our pcap to read the exact `Nsc/Nr/Nc/grouping`,
+then plug those into `main_su`. Turns "decode HE from scratch" into "set 4 values."
+
+---
+
+## 7. Detection pipeline (Objective 2 → 3)
 
 ```
    GN630v AP (victim + sensor)
-        |  iwpriv rai1 stat   (poll every 2 s, over telnet)
-        v
+        │  iwpriv rai1 stat   (poll every 2 s, over telnet)
+        ▼
    RAW COUNTERS (cumulative)          INSTANT GAUGES
-     Tx success / Tx fail               Rssi0..3  (per-chain -> SNR)
+     Tx success / Tx fail               Rssi0..3  (per-chain → SNR)
      Rx success / Rx CRC                Last TX/RX Rate: NSS, MCS, BW, GI, HE-mode
      Packets / Bytes                    Temperature
-        |
-        |  compute_deltas() over dt
-        v
-   FEATURES per 2 s window
-     throughput_tx/rx_mbps             <- goodput (drops under attack)
-     retry_rate = txfail/(txsucc+txfail)  <- the BeamCraft retry-flag proxy
-     tx_per / rx_per                   <- packet-error-rate (spikes)
-     rssi0..3                          <- SNR shift when beam is misdirected
-     tx_mcs / rx_mcs / tx_nss          <- rate collapse under forged BFI
-        |
-        |  --label normal | attack
-        v
-   CSV dataset  -->  Isolation Forest (Obj 3)  -->  anomaly score  -->  alert
+        │  compute_deltas() over dt
+        ▼
+   FEATURES per 2 s window                         behaviour under attack
+     throughput_tx/rx_mbps  ── goodput ──────────────────► collapses
+     retry_rate = txfail/(txsucc+txfail) ────────────────► spikes
+     tx_per / rx_per ── packet error rate ───────────────► spikes
+     rssi0..3 ── per-chain SNR ──────────────────────────► shifts (beam misaimed)
+     tx_mcs / tx_nss ── modulation ──────────────────────► drops
+        │  --label normal | attack
+        ▼
+   CSV dataset  →  Isolation Forest (train on NORMAL only)  →  anomaly score  →  🚨
 ```
 
-## Stack
+**Why Isolation Forest?** We reliably have only *normal* traffic to learn from;
+attacks are rare and varied. Unsupervised anomaly detection trains on normal and
+flags whatever "isolates" too easily — catching an attack it never trained on.
 
-| Layer | Tech |
+---
+
+## 8. Tools
+
+| Tool | What it does |
 |---|---|
-| Router firmware | OpenWrt 24.10+ (custom package) |
-| Attack replication | Kali Linux, Alfa AWUS036ACM (monitor mode + injection) |
-| ML engine | Python 3, scikit-learn (Isolation Forest), pandas, numpy |
-| Dashboard | OpenWrt LuCI |
-| Alerts | Telegram bot |
+| `tools/gn630v_telemetry.py` | telnet → `iwpriv rai1 stat` every 2 s → CSV (RSSI/MCS/throughput/retry), labelled `normal`/`attack`. Backed by `gn630v_telnet.py` (stdlib raw-socket telnet). |
+| `tools/dashboard.py` + `dashboard.html` | **live** telemetry web dashboard (Starlette + WebSocket + Chart.js). `--mode live` polls the router; `--mode replay` streams a CSV (demo-safe, no router). Run via `.venv/bin/python`. See `docs/dashboard.md`. |
+| `tools/bfi_capture.py` | capture/inspect VHT/HE beamforming action frames (tshark) → decode `Nc/Nr/width` and compare vs assumptions. *(live mode note: capture raw with `tshark -w`, analyse with `pcap` mode.)* |
+| `tools/attack_harness.py` | iperf3 baseline-vs-attack downlink throughput → drop % + ≥51% success gate → JSON. |
+| `tools/attack_gui.py` | Tkinter panel: scan NIC, monitor mode, patch+compile+run `main_su` via one `pkexec`. |
+| `BeamCraft_AE/main_su.cpp` | BeamCraft SU attack (configurable: `--iface/--ap/--victim/--alpha/--type/--offset`, `NR/NC/NST` defines). |
 
-## Tools
+---
 
-- `tools/attack_gui.py` — Tkinter control panel for the SU (single-user)
-  attack: scans WiFi adapters for monitor-mode support, sets a chosen NIC
-  into monitor mode on a given channel, patches `BeamCraft_AE/main_su.cpp`
-  with the interface/AP MAC/victim MAC/alpha you enter, recompiles it, and
-  runs it — all via one `pkexec` prompt. MU (multi-user) mode isn't wired
-  in yet (its packet filter targets up to 5 MACs vs SU's 2).
-  Run: `python3 tools/attack_gui.py`.
-- `tools/test_attack_gui.py` — sanity checks for the source-patching and
-  hardware-parsing logic above (`python3 tools/test_attack_gui.py`).
-- `tools/telemetry_capture.py` — polls `iw station dump` on the router over
-  SSH and logs RSSI/MCS/throughput/retry-rate per client to CSV, labelled
-  `normal`/`attack` for the Objective 2 dataset.
-  Run: `python3 tools/telemetry_capture.py --host <router-ip> --iface wlan0 --label normal`.
-- `tools/test_telemetry_capture.py` — checks the parsing/delta math against
-  two real `iw station dump` snapshots (`python3 tools/test_telemetry_capture.py`).
-- `tools/gn630v_telemetry.py` — the GN630v sibling of `telemetry_capture.py`:
-  telnets to the ONT and polls `iwpriv <if> stat`, diffing counters into
-  RSSI/MCS/throughput/retry-rate CSV rows labelled `normal`/`attack`.
-  Run: `python3 tools/gn630v_telemetry.py --iface rai1 --label normal --out data/normal.csv`.
-  Backed by `tools/gn630v_telnet.py` (raw-socket telnet transport) and
-  tested against a real captured fixture (`tools/test_gn630v_telemetry.py`).
-- Full usage guide: [Beam Warden Tooling Manual](https://coldcollectives.my/projects/beam-warden-docs.html)
-  — setup, CLI reference, end-to-end workflow, known limitations.
+## 9. Datasets
 
-## Repo layout
+| File | Class | Conditions |
+|---|---|---|
+| `data/normal_iperf.csv` | **normal** | legit traffic + live iperf3 load, **no attack** (~98 Mbps, PER ~15%, retry ~0.13, MCS 3–4, HE_SU BW80) |
+| `data/bfi_he_capture.pcap` | — | 171 live HE beamforming reports (Gate-2 evidence) |
+| _(next)_ `data/attack_*.csv` | **attack** | same link while forged BFI is injected |
 
-- `the project proposal` — full project proposal (problem statement,
-  feasibility study, specs, Gantt chart, costing).
-- `beamcraft_attack (1).pdf` — the BeamCraft paper (IEEE TMC 2026) this
-  project's attack replicates; see references below.
-- `tools/` — our own scripts (tracked; see above).
-- `BeamCraft_AE/`, `BFM-tool/` — external reference repos, cloned as-is
-  (gitignored, not part of this project's own git history). `BeamCraft_AE`
-  is the attack implementation; `BFM-tool` captures/plots raw BFI packets.
+---
+
+## 10. Hardware & stack
+
+| Role | Device / tech |
+|---|---|
+| Target AP / telemetry sensor | Skyworth **GN630v** ONT — MediaTek **MT7916**, 5 GHz ch48, SU/MU HE beamforming |
+| Attacker NIC | Alfa **AWUS036ACM** — MediaTek **MT7921** (`mt76`), monitor + injection |
+| Attack code | C++ (`main_su`), libpcap, Eigen3; aircrack-ng for injection verification |
+| Telemetry + ML | Python 3, Starlette/uvicorn (dashboard), scikit-learn (Isolation Forest) |
+| Detection host (target) | OpenWrt 24.10+ LuCI + Telegram alerts *(deployment target)* |
+
+---
+
+## 11. Repo layout
+
+- `docs/` — progress report, challenges log, Gate-2 findings, dashboard guide, hardware recon.
+- `tools/` — our scripts (tracked).
+- `data/` — datasets + captures.
+- `BeamCraft_AE/`, `BFM-tool/` — external reference repos (gitignored). `BeamCraft_AE` = the VHT attack; `BFM-tool` = raw BFI capture.
+- `Wi-BFI-WFI6.pdf` — the HE BFI extraction reference (Wi-BFI, WiNTECH '23).
+- `*.pdf` — proposal, BeamCraft paper.
+
+---
 
 ## Team
 
@@ -146,6 +298,8 @@ Supervisor: the supervisor
 
 ## References
 
-Key related work: BeamCraft (2026, the attack this project replicates),
-LeakyBeam / NDSS 2025 (BFI privacy side-channel), KIT KASTEL (2025, WiFi
-surveillance via BFI). Full list in the proposal PDF, section 15.
+- **BeamCraft** (2026) — the forged-BFI attack this project replicates.
+- **Wi-BFI** (Haque, Meneghello, Restuccia; ACM WiNTECH '23) — extracting 802.11ac/ax
+  BFI from commodity devices; the HE decoder reference (`Wi-BFI-WFI6.pdf`).
+- IEEE 802.11-2020 §21 (VHT) / §27 (HE) — compressed beamforming report format.
+- Full related work (LeakyBeam, KIT KASTEL) in the proposal PDF §15.
