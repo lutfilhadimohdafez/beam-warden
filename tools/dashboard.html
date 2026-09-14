@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beam Warden — Live Telemetry</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1e28;
+    --panel-border: #2a2f3e;
+    --text: #e6e9ef;
+    --text-dim: #8b91a0;
+    --accent: #fb8d24;
+    --accent-dim: #5a3a12;
+    --green: #0d3;
+    --amber: #fb0;
+    --red: #f55;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 20px 40px;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--panel-border);
+    margin-bottom: 20px;
+  }
+  .header-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .header-title span { color: var(--accent); }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--red);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .mode-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: #000;
+    transition: background 0.3s, color 0.3s;
+  }
+  .mode-badge.replay {
+    background: #3a3f4e;
+    color: #aaa;
+  }
+
+  /* Error bar */
+  .error-bar {
+    display: none;
+    background: #2a1215;
+    border: 1px solid #5a2025;
+    color: var(--red);
+    padding: 8px 14px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+  }
+  .error-bar.visible { display: block; }
+
+  /* Stat tiles */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 16px 14px;
+    text-align: center;
+  }
+  .tile-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .tile-unit {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+  .tile-caption {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tile-sub {
+    font-size: 0.7rem;
+    color: #5a6070;
+    margin-top: 2px;
+  }
+
+  /* Charts grid */
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 16px;
+  }
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .chart-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 220px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">Beam <span>Warden</span> — Live Telemetry</div>
+    <div class="header-right">
+      <div class="status-indicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Disconnected</span>
+      </div>
+      <div class="mode-badge" id="modeBadge">LIVE</div>
+    </div>
+  </div>
+
+  <!-- Error bar -->
+  <div class="error-bar" id="errorBar"></div>
+
+  <!-- Stat tiles -->
+  <div class="tiles">
+    <div class="tile">
+      <div class="tile-value"><span id="valTxTput">-</span> <span class="tile-unit">Mbps</span></div>
+      <div class="tile-caption">TX Throughput</div>
+    </div>
+    <div class="tile">
+      <div class="tile-value"><span id="valRetry">-</span></div>
+      <div class="tile-caption">Retry Rate</div>
+    </div>
+    <div class="tile">
+      <div class="tile-value"><span id="valTxPer">-</span> <span class="tile-unit">%</span></div>
+      <div class="tile-caption">TX PER</div>
+    </div>
+    <div class="tile">
+      <div class="tile-value"><span id="valRssi">-</span> <span class="tile-unit">dBm</span></div>
+      <div class="tile-caption">RSSI (chain 0)</div>
+    </div>
+    <div class="tile">
+      <div class="tile-value" id="valMcs">-</div>
+      <div class="tile-caption">TX MCS</div>
+      <div class="tile-sub" id="valMcsSub"></div>
+    </div>
+    <div class="tile">
+      <div class="tile-value"><span id="valTemp">-</span> <span class="tile-unit">°C</span></div>
+      <div class="tile-caption">Temp</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts">
+    <div class="chart-card">
+      <div class="chart-title">TX Throughput (Mbps)</div>
+      <div class="chart-wrap"><canvas id="chartTxTput"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Retry Rate</div>
+      <div class="chart-wrap"><canvas id="chartRetry"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Packet Error Rate (%)</div>
+      <div class="chart-wrap"><canvas id="chartPer"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">RSSI per chain (dBm)</div>
+      <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/chart.umd.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---- Constants ---- */
+  const MAX_POINTS = 60;
+  const RECONNECT_MS = 2000;
+  const WS_PATH = "/ws";
+
+  /* ---- DOM refs ---- */
+  const $statusDot  = document.getElementById("statusDot");
+  const $statusText = document.getElementById("statusText");
+  const $modeBadge  = document.getElementById("modeBadge");
+  const $errorBar   = document.getElementById("errorBar");
+  const $valTxTput  = document.getElementById("valTxTput");
+  const $valRetry   = document.getElementById("valRetry");
+  const $valTxPer   = document.getElementById("valTxPer");
+  const $valRssi    = document.getElementById("valRssi");
+  const $valMcs     = document.getElementById("valMcs");
+  const $valMcsSub  = document.getElementById("valMcsSub");
+  const $valTemp    = document.getElementById("valTemp");
+
+  /* ---- Status helpers ---- */
+  function setStatus(state, text) {
+    $statusDot.style.background = state === "ok" ? "#0d3" : state === "warn" ? "#fb0" : "#f55";
+    $statusText.textContent = text;
+  }
+
+  function setMode(mode) {
+    if (mode === "replay") {
+      $modeBadge.textContent = "REPLAY";
+      $modeBadge.classList.add("replay");
+    } else {
+      $modeBadge.textContent = "LIVE";
+      $modeBadge.classList.remove("replay");
+    }
+  }
+
+  function showError(msg) {
+    if (msg) {
+      $errorBar.textContent = msg;
+      $errorBar.classList.add("visible");
+    } else {
+      $errorBar.classList.remove("visible");
+    }
+  }
+
+  /* ---- Chart defaults for dark theme ---- */
+  const gridColor = "rgba(255,255,255,0.07)";
+  const tickColor = "#6b7185";
+
+  function baseLineOpts(yLabel) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: tickColor, boxWidth: 12, font: { size: 11 } }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: tickColor, maxTicksLimit: 8, font: { size: 10 } },
+          grid: { color: gridColor }
+        },
+        y: {
+          title: { display: !!yLabel, text: yLabel || "", color: tickColor, font: { size: 11 } },
+          ticks: { color: tickColor, font: { size: 10 } },
+          grid: { color: gridColor }
+        }
+      }
+    };
+  }
+
+  /* ---- Create charts ---- */
+  const labels = [];
+
+  function makeDataset(label, color) {
+    return {
+      label: label,
+      data: [],
+      borderColor: color,
+      backgroundColor: color + "33",
+      borderWidth: 1.8,
+      pointRadius: 0,
+      tension: 0.25,
+      fill: false
+    };
+  }
+
+  const chartTxTput = new Chart(document.getElementById("chartTxTput"), {
+    type: "line",
+    data: { labels: [], datasets: [makeDataset("TX", "#fb8d24")] },
+    options: baseLineOpts("Mbps")
+  });
+
+  const chartRetry = new Chart(document.getElementById("chartRetry"), {
+    type: "line",
+    data: { labels: [], datasets: [makeDataset("Retry Rate", "#fb8d24")] },
+    options: baseLineOpts("")
+  });
+
+  const chartPer = new Chart(document.getElementById("chartPer"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        makeDataset("TX PER", "#fb8d24"),
+        makeDataset("RX PER", "#4ea8f6")
+      ]
+    },
+    options: baseLineOpts("%")
+  });
+
+  const chartRssi = new Chart(document.getElementById("chartRssi"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        makeDataset("RSSI 0", "#fb8d24"),
+        makeDataset("RSSI 1", "#4ea8f6"),
+        makeDataset("RSSI 2", "#34d399"),
+        makeDataset("RSSI 3", "#f472b6")
+      ]
+    },
+    options: baseLineOpts("dBm")
+  });
+
+  const allCharts = [chartTxTput, chartRetry, chartPer, chartRssi];
+
+  /* Rolling-window push helper */
+  function rollingPush(arr, val) {
+    arr.push(val);
+    if (arr.length > MAX_POINTS) arr.shift();
+  }
+
+  /* ---- Sample counter for labels ---- */
+  let sampleCount = 0;
+
+  /* ---- Process incoming telemetry message ---- */
+  function handleMessage(d) {
+    /* Update stat tiles */
+    $valTxTput.textContent = d.throughput_tx_mbps.toFixed(1);
+    $valRetry.textContent  = d.retry_rate.toFixed(3);
+    $valTxPer.textContent  = d.tx_per_pct.toFixed(2);
+    $valRssi.textContent   = d.rssi0;
+    $valTemp.textContent   = d.temp_c;
+
+    if (d.tx_mcs !== null && d.tx_mcs !== undefined) {
+      $valMcs.textContent = d.tx_mcs;
+      let sub = [];
+      if (d.tx_nss !== null)      sub.push(d.tx_nss + "SS");
+      if (d.tx_bw !== null)       sub.push(d.tx_bw);
+      if (d.tx_phymode !== null)  sub.push(d.tx_phymode);
+      $valMcsSub.textContent = sub.join(" · ");
+    } else {
+      $valMcs.textContent = "-";
+      $valMcsSub.textContent = "";
+    }
+
+    /* Mode badge */
+    setMode(d.mode);
+
+    /* Error handling — show error but keep chart data */
+    if (d.status === "error") {
+      setStatus("error", "Error");
+      showError(d.error || "Unknown error from telemetry stream");
+    } else {
+      setStatus("ok", "Connected");
+      showError(null);
+    }
+
+    /* Push data to charts (rolling window) */
+    sampleCount++;
+    const lbl = sampleCount;
+    rollingPush(labels, lbl);
+
+    /* TX Throughput */
+    rollingPush(chartTxTput.data.labels, lbl);
+    rollingPush(chartTxTput.data.datasets[0].data, d.throughput_tx_mbps);
+
+    /* Retry Rate */
+    rollingPush(chartRetry.data.labels, lbl);
+    rollingPush(chartRetry.data.datasets[0].data, d.retry_rate);
+
+    /* PER */
+    rollingPush(chartPer.data.labels, lbl);
+    rollingPush(chartPer.data.datasets[0].data, d.tx_per_pct);
+    rollingPush(chartPer.data.datasets[1].data, d.rx_per_pct);
+
+    /* RSSI */
+    rollingPush(chartRssi.data.labels, lbl);
+    rollingPush(chartRssi.data.datasets[0].data, d.rssi0);
+    rollingPush(chartRssi.data.datasets[1].data, d.rssi1);
+    rollingPush(chartRssi.data.datasets[2].data, d.rssi2);
+    rollingPush(chartRssi.data.datasets[3].data, d.rssi3);
+
+    /* Trim label arrays to MAX_POINTS */
+    allCharts.forEach(function (c) {
+      while (c.data.labels.length > MAX_POINTS) {
+        c.data.labels.shift();
+        c.data.datasets.forEach(function (ds) { ds.data.shift(); });
+      }
+    });
+
+    /* Redraw without animation */
+    allCharts.forEach(function (c) { c.update("none"); });
+  }
+
+  /* ---- WebSocket connection with auto-reconnect ---- */
+  let ws = null;
+  let reconnectTimer = null;
+
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+    setStatus("warn", "Connecting…");
+    showError(null);
+
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + WS_PATH);
+
+    ws.onopen = function () {
+      setStatus("ok", "Connected");
+      showError(null);
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    };
+
+    ws.onmessage = function (evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        handleMessage(data);
+      } catch (e) {
+        console.error("Bad telemetry payload:", e);
+      }
+    };
+
+    ws.onclose = function () {
+      setStatus("error", "Disconnected");
+      scheduleReconnect();
+    };
+
+    ws.onerror = function () {
+      setStatus("error", "Connection error");
+      ws.close();
+    };
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(function () {
+      reconnectTimer = null;
+      connect();
+    }, RECONNECT_MS);
+  }
+
+  /* ---- Kick off ---- */
+  connect();
+
+})();
+</script>
+</body>
+</html>
