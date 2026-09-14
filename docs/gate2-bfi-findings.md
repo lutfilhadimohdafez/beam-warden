@@ -48,6 +48,54 @@ report bytes — see the preserved pcap.
 | The target's BFI format identified | ✅ **HE / 802.11ax, ~277-byte report** |
 | Forge HE BFI + collapse victim throughput | ⛔ requires the VHT→HE port below |
 
+## Exact HE parameters — fully decoded (2026-09-15 ~03:30)
+
+Decoded the HE MIMO Control field of all 171 frames (tshark 4.7.3 exposes it as
+`wlan.he.mimo.*`, **not** `wlan.he.mimo_control.*`; needs two-pass `-2`). Every
+frame is identical:
+
+| Parameter | Raw | Value |
+|---|---|---|
+| Feedback type | `feedback_type=0` | **SU** |
+| Nc (columns / streams) | `nc_index=1` | **2** |
+| Nr (rows / tx antennas) | `nr_index=1` | **2** |
+| Bandwidth | `bw=2` | **80 MHz** |
+| Grouping | `grouping=0` | **Ng = 4** |
+| Codebook | `codebook_info=0` | **φ = 4 bits, ψ = 2 bits** |
+| Angles / subcarrier | 2×2 → | **2** (φ11, ψ21) = 6 bits |
+| Subcarriers Ns | — | **~245** (HE 80 MHz, Ng4) |
+| Segmentation | `first_seg=1, remaining=0` | single segment |
+
+**Cross-check (closes exactly):** 277 B frame − radiotap 56 − MAC hdr 24 −
+cat/action/MIMO-ctrl/avgSNR 9 − FCS 4 = **184 BFA bytes = 1472 bits ÷ 6
+bits/sub ≈ 245 subcarriers** = HE-80 MHz/Ng4. ✅
+
+**Two consequences:**
+1. The target link is **2×2**, not the paper's 4×2 — so the decode is the
+   *minimal* case (one φ, one ψ per subcarrier). Wi-BFI's `4x2` config failed on
+   our pcap precisely because of this (it expected 10 angles/subcarrier).
+2. **Attack-effectiveness caveat:** in a full-rank 2×2 (Nr=Nc=2) the AP has no
+   spare antenna dimensions, so "steer energy into the null space" is weaker than
+   in 4×2. A forged V still mis-precodes (degrades throughput), but for a stronger
+   demo a victim/config giving **Nr > Nc** (e.g. 4×1 / 4×2) leaves a null space to
+   exploit. Worth testing different victim devices.
+
+## Port parameters for `main_su.cpp` (VHT 4×2 → HE 2×2)
+
+| `main_su` symbol | VHT value | **set to (HE 2×2)** |
+|---|---|---|
+| `NR` | 4 | **2** |
+| `NC` | 2 | **2** |
+| `NST` | 52 | **~245** |
+| `NumBitsPhi` | 6 | **4** (codebook 0) |
+| `NumBitsPsi` | 4 | **2** (codebook 0) |
+| angle order | 4×2 (10 angles) | **2×2: φ11, ψ21** |
+| report offset | `len_head+7` | HE: MAC24 + cat1 + action1 + MIMOctrl5 + avgSNR2 |
+
+The Eigen fixed-size matrices (`Matrix<...,4,2>`, `Matrix<float,10,52>`) shrink to
+2×2 / `[2,245]`, and `re_beamforming()`'s Givens loop collapses to a single
+rotation — a much smaller kernel than the 4×2 original.
+
 ## Next research step (well-scoped)
 
 Port the BFI decode/re-encode in `main_su.cpp` (`re_beamforming()`) from the **VHT**
