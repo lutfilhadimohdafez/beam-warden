@@ -2,6 +2,7 @@
 """BeamCraft Attack GUI — polished Tkinter control panel for beamforming-spoofing attack."""
 
 import os
+import queue
 import re
 import signal
 import subprocess
@@ -295,41 +296,67 @@ class App(tk.Tk):
             self.println(f"[ERROR] Failed to start attack: {exc}")
             return
 
+        # Reader thread drains main_su stdout into a queue, so the Tk mainloop
+        # never blocks on readline() (which froze the GUI when no frames arrived).
+        self.attack_queue = queue.Queue()
+        threading.Thread(
+            target=self._reader_thread, args=(self.attack_proc,), daemon=True
+        ).start()
+
         self.attack_running = True
         self.btn_attack.configure(text="■ Stop", bg="#8a1a1a")
         self._set_status("ATTACKING", "#ef5350")
         self._poll_attack_output()
 
+    def _reader_thread(self, proc):
+        try:
+            for line in iter(proc.stdout.readline, ""):
+                self.attack_queue.put(line.rstrip("\n"))
+        except Exception:
+            pass
+        self.attack_queue.put(None)  # sentinel: stream closed
+
     def _poll_attack_output(self):
-        """Non-blocking poll of main_su stdout via self.after()."""
-        if not self.attack_running or self.attack_proc is None:
+        """Drain the reader queue without blocking the Tk mainloop."""
+        if not self.attack_running:
             return
-        line = self.attack_proc.stdout.readline()
-        if line:
-            stripped = line.rstrip("\n")
-            self.attack_output_lines.append(stripped)
-            self.frame_count += 1
-            self.println(stripped)
+        try:
+            for _ in range(200):
+                item = self.attack_queue.get_nowait()
+                if item is None:  # stream closed → process ended
+                    self._finalise_attack()
+                    return
+                self.attack_output_lines.append(item)
+                self.frame_count += 1
+                self.println(item)
+        except queue.Empty:
+            pass
         elapsed = time.time() - self.attack_start if self.attack_start else 0
         self.attack_info.configure(
             text=f"Frames: {self.frame_count}  |  Elapsed: {elapsed:.0f}s"
         )
-        if self.attack_proc.poll() is not None:
-            # Process ended on its own
-            self._finalise_attack()
-            return
-        self.after(50, self._poll_attack_output)
+        self.after(100, self._poll_attack_output)
 
     def _stop_attack(self):
+        # main_su runs as root (via pkexec); a non-root process cannot signal it,
+        # so send SIGINT (clean shutdown) as root via pkexec + pkill.
         if self.attack_proc and self.attack_proc.poll() is None:
-            self.attack_proc.terminate()
+            self.println("Stopping attack (root)…")
+            try:
+                subprocess.run(
+                    ["pkexec", "pkill", "-INT", "-f", f"^{BINARY}"], timeout=20
+                )
+            except Exception as exc:
+                self.println(f"[stop] {exc}")
             try:
                 self.attack_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.attack_proc.kill()
+            except Exception:
+                pass
         self._finalise_attack()
 
     def _finalise_attack(self):
+        if not self.attack_running:
+            return  # already finalised — avoid double report
         self.attack_running = False
         self.attack_end = time.time()
         self.btn_attack.configure(text="② Fire attack", bg="#5a2a2a")
