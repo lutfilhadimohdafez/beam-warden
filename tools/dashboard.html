@@ -3,291 +3,509 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Beam Warden — Live Telemetry</title>
+<title>BEAM // WARDEN — Telemetry + Anomaly Engine</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <style>
   :root {
-    --bg: #0f1117;
-    --panel: #1a1e28;
-    --panel-border: #2a2f3e;
-    --text: #e6e9ef;
-    --text-dim: #8b91a0;
+    --bg: #0b0d12;
+    --panel: #12151d;
+    --panel-2: #171b25;
+    --border: #242a38;
     --accent: #fb8d24;
-    --accent-dim: #5a3a12;
-    --green: #0d3;
-    --amber: #fb0;
-    --red: #f55;
-    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    --accent-2: #f5620a;
+    --text: #eef1f6;
+    --muted: #808a9e;
+    --ok: #35d07f;
+    --danger: #ff4b4b;
+    --grid: #1e2430;
+    --font-display: 'Oswald', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: var(--font);
+    font-family: var(--font-display);
     font-size: 14px;
     line-height: 1.5;
     min-height: 100vh;
+    position: relative;
+  }
+
+  /* GRAIN overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 200px;
   }
 
   .container {
-    max-width: 1280px;
+    max-width: 1320px;
     margin: 0 auto;
-    padding: 0 20px 40px;
+    padding: 0 20px 100px;
   }
 
-  /* Header */
+  /* ---- HEADER ---- */
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 16px 0;
-    border-bottom: 1px solid var(--panel-border);
+    padding: 18px 0 14px;
+    border-bottom: 1px solid var(--border);
     margin-bottom: 20px;
   }
-  .header-title {
-    font-size: 1.35rem;
+  .header-left { display: flex; flex-direction: column; gap: 2px; }
+  .wordmark {
+    font-family: var(--font-display);
     font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
   }
-  .header-title span { color: var(--accent); }
+  .wordmark .warden { color: var(--accent); }
+  .wordmark .sep { color: var(--muted); margin: 0 2px; }
+  .subtitle {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
   .header-right {
     display: flex;
     align-items: center;
-    gap: 14px;
-    flex-wrap: wrap;
+    gap: 16px;
   }
   .status-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--muted);
   }
   .status-dot {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
-    background: var(--red);
+    background: var(--danger);
     flex-shrink: 0;
     transition: background 0.3s;
   }
+  .status-dot.ok { background: var(--ok); }
+  .status-dot.warn { background: var(--accent); }
+  .nav-link {
+    font-family: var(--font-display);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .nav-link:hover { color: var(--accent); }
+
+  /* ---- MODE BADGE ---- */
   .mode-badge {
     display: inline-block;
-    padding: 2px 10px;
-    border-radius: 9999px;
+    padding: 3px 14px;
+    border-radius: 3px;
+    font-family: var(--font-display);
     font-size: 0.75rem;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    background: var(--accent);
+    background: var(--ok);
     color: #000;
     transition: background 0.3s, color 0.3s;
   }
   .mode-badge.replay {
-    background: #f59e0b;
+    background: var(--accent);
     color: #000;
-    font-size: 0.95rem;
-    padding: 6px 20px;
-    box-shadow: 0 0 14px rgba(245,158,11,0.45);
-    letter-spacing: 0.1em;
   }
 
-  /* Detection panel */
-  .detect-panel {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    padding: 18px 22px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    flex-wrap: wrap;
-  }
-  .detect-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 22px;
-    border-radius: 9999px;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-  }
-  .detect-chip.normal {
-    background: rgba(0,221,51,0.15);
-    color: #0d3;
-    border: 1px solid rgba(0,221,51,0.3);
-  }
-  .detect-chip.attack {
-    background: rgba(255,68,68,0.18);
-    color: #f55;
-    border: 1px solid rgba(255,68,68,0.4);
-    animation: pulse-red 1.2s ease-in-out infinite;
-  }
-  .detect-chip.off {
-    background: rgba(139,145,160,0.12);
-    color: #6b7185;
-    border: 1px solid rgba(139,145,160,0.2);
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-  @keyframes pulse-red {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,68,68,0.4); }
-    50% { box-shadow: 0 0 18px 4px rgba(255,68,68,0.35); }
-  }
-  .detect-score {
-    text-align: center;
-  }
-  .detect-score-val {
-    font-size: 1.5rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--text);
-  }
-  .detect-score-caption {
-    font-size: 0.65rem;
-    color: var(--text-dim);
-    max-width: 220px;
-    line-height: 1.3;
-  }
-
-  /* Error bar */
+  /* ---- ERROR BAR ---- */
   .error-bar {
     display: none;
-    background: #2a1215;
-    border: 1px solid #5a2025;
-    color: var(--red);
+    background: rgba(255,75,75,0.08);
+    border: 1px solid rgba(255,75,75,0.25);
+    color: var(--danger);
     padding: 8px 14px;
-    border-radius: 6px;
+    border-radius: 3px;
     margin-bottom: 16px;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
   }
   .error-bar.visible { display: block; }
 
-  /* Stat tiles */
+  /* ---- DETECTION PANEL ---- */
+  .detect-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 3px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .detect-status {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .detect-status.normal { color: var(--ok); }
+  .detect-status.attack {
+    color: var(--danger);
+    animation: pulse-text 1.2s ease-in-out infinite;
+  }
+  .detect-status.offline { color: var(--muted); font-size: 1.1rem; font-weight: 600; }
+  @keyframes pulse-text {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .detect-score-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-left: 32px;
+    border-left: 1px solid var(--border);
+  }
+  .detect-score-val {
+    font-family: var(--font-mono);
+    font-size: 2.2rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .detect-score-caption {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* ---- SECTION LABEL ---- */
+  .section-label {
+    font-family: var(--font-display);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+    padding-left: 14px;
+    position: relative;
+  }
+  .section-label::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  /* ---- STAT TILES ---- */
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
     margin-bottom: 24px;
+  }
+  @media (max-width: 900px) {
+    .tiles { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 540px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
   }
   .tile {
     background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    padding: 16px 14px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 12px 12px;
     text-align: center;
   }
+  .tile-label {
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
   .tile-value {
-    font-size: 1.7rem;
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
     font-weight: 700;
     line-height: 1.2;
     color: var(--text);
     font-variant-numeric: tabular-nums;
   }
   .tile-unit {
-    font-size: 0.85rem;
-    color: var(--text-dim);
+    font-size: 0.75rem;
+    color: var(--muted);
     font-weight: 400;
   }
-  .tile-caption {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin-top: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
   .tile-sub {
-    font-size: 0.7rem;
-    color: #5a6070;
-    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin-top: 3px;
   }
 
-  /* Charts grid */
+  /* ---- CHARTS ---- */
   .charts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 16px;
+    gap: 12px;
+    margin-bottom: 20px;
   }
   .chart-card {
     background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
     padding: 14px;
   }
   .chart-title {
-    font-size: 0.82rem;
+    font-family: var(--font-display);
+    font-size: 0.68rem;
     font-weight: 600;
-    color: var(--text-dim);
-    margin-bottom: 10px;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    color: var(--muted);
+    margin-bottom: 10px;
+    padding-left: 14px;
+    position: relative;
+  }
+  .chart-title::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+    border-radius: 1px;
   }
   .chart-wrap {
     position: relative;
-    height: 220px;
+    height: 210px;
+  }
+
+  /* ---- PLAYBACK BAR ---- */
+  .playback-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 10px 24px;
+    display: none;
+    align-items: center;
+    gap: 12px;
+    z-index: 1000;
+  }
+  .playback-bar.visible { display: flex; }
+  .pb-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    line-height: 1;
+    min-width: 32px;
+    text-align: center;
+  }
+  .pb-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .pb-btn.active { border-color: var(--accent); color: var(--accent); }
+  .pb-scrubber-wrap {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 28px;
+  }
+  .pb-scrubber {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .pb-scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+  }
+  .pb-scrubber::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+  }
+  .attack-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 1px;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .attack-marker-label {
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-display);
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .pb-readout {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+    min-width: 120px;
+    text-align: right;
+  }
+  .pb-interval {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pb-jump-btn {
+    background: none;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--accent);
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+  }
+  .pb-jump-btn:hover {
+    background: var(--accent);
+    color: #000;
   }
 </style>
 </head>
 <body>
 <div class="container">
-  <!-- Header -->
+
+  <!-- HEADER -->
   <div class="header">
-    <div class="header-title">Beam <span>Warden</span> — Live Telemetry</div>
+    <div class="header-left">
+      <div class="wordmark">BEAM <span class="sep">//</span> <span class="warden">WARDEN</span></div>
+      <div class="subtitle">Telemetry + Anomaly Engine</div>
+    </div>
     <div class="header-right">
+      <div class="mode-badge" id="modeBadge">LIVE</div>
       <div class="status-indicator">
         <div class="status-dot" id="statusDot"></div>
         <span id="statusText">Disconnected</span>
       </div>
-      <div class="mode-badge" id="modeBadge">LIVE</div>
+      <a href="/ml" class="nav-link">ML Engine &rarr;</a>
     </div>
   </div>
 
-  <!-- Error bar -->
+  <!-- ERROR BAR -->
   <div class="error-bar" id="errorBar"></div>
 
-  <!-- Detection panel -->
+  <!-- DETECTION PANEL -->
   <div class="detect-panel">
-    <div class="detect-chip off" id="detectChip">detector: off</div>
-    <div class="detect-score">
-      <div class="detect-score-val" id="detectScoreVal">—</div>
-      <div class="detect-score-caption">IsolationForest score (&gt;0 normal, &lt;0 anomalous)</div>
+    <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
+    <div class="detect-score-wrap">
+      <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
+      <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
     </div>
   </div>
 
-  <!-- Stat tiles -->
+  <!-- STAT TILES -->
+  <div class="section-label">TELEMETRY</div>
   <div class="tiles">
     <div class="tile">
-      <div class="tile-value"><span id="valTxTput">-</span> <span class="tile-unit">Mbps</span></div>
-      <div class="tile-caption">TX Throughput</div>
+      <div class="tile-label">TX Throughput</div>
+      <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
     </div>
     <div class="tile">
-      <div class="tile-value"><span id="valRetry">-</span></div>
-      <div class="tile-caption">Retry Rate</div>
+      <div class="tile-label">Retry Rate</div>
+      <div class="tile-value" id="valRetry">-</div>
     </div>
     <div class="tile">
-      <div class="tile-value"><span id="valTxPer">-</span> <span class="tile-unit">%</span></div>
-      <div class="tile-caption">TX PER</div>
+      <div class="tile-label">TX PER</div>
+      <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
     </div>
     <div class="tile">
-      <div class="tile-value"><span id="valRssi">-</span> <span class="tile-unit">dBm</span></div>
-      <div class="tile-caption">RSSI (chain 0)</div>
+      <div class="tile-label">RSSI 0</div>
+      <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
     </div>
     <div class="tile">
+      <div class="tile-label">TX MCS</div>
       <div class="tile-value" id="valMcs">-</div>
-      <div class="tile-caption">TX MCS</div>
       <div class="tile-sub" id="valMcsSub"></div>
     </div>
     <div class="tile">
-      <div class="tile-value"><span id="valTemp">-</span> <span class="tile-unit">°C</span></div>
-      <div class="tile-caption">Temp</div>
+      <div class="tile-label">Temp</div>
+      <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
     </div>
   </div>
 
-  <!-- Charts -->
+  <!-- CHARTS -->
+  <div class="section-label">TIME SERIES</div>
   <div class="charts">
     <div class="chart-card">
       <div class="chart-title">TX Throughput (Mbps)</div>
@@ -302,7 +520,7 @@
       <div class="chart-wrap"><canvas id="chartPer"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="chart-title">RSSI per chain (dBm)</div>
+      <div class="chart-title">RSSI Chains 0-3 (dBm)</div>
       <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
     </div>
     <div class="chart-card">
@@ -310,6 +528,25 @@
       <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
     </div>
   </div>
+
+</div>
+
+<!-- PLAYBACK BAR -->
+<div class="playback-bar" id="playbackBar">
+  <button class="pb-btn" id="pbSeekStart" title="Seek to start">&#9198;</button>
+  <button class="pb-btn" id="pbStepBack" title="Step back">&#9664;</button>
+  <button class="pb-btn" id="pbPlayPause" title="Play / Pause">&#9654;</button>
+  <button class="pb-btn" id="pbStepFwd" title="Step forward">&#9654;|</button>
+  <button class="pb-btn" id="pbSeekEnd" title="Seek to end">&#9197;</button>
+  <div class="pb-scrubber-wrap">
+    <input type="range" class="pb-scrubber" id="pbScrubber" min="0" max="1" value="0" step="1">
+    <div class="attack-marker" id="attackMarker" style="display:none;">
+      <div class="attack-marker-label">&#9873; ATTACK</div>
+    </div>
+  </div>
+  <button class="pb-jump-btn" id="pbJumpAttack" style="display:none;">JUMP TO ATTACK</button>
+  <div class="pb-readout" id="pbReadout">0 / 0</div>
+  <div class="pb-interval" id="pbInterval"></div>
 </div>
 
 <script src="/static/chart.umd.min.js"></script>
@@ -317,35 +554,53 @@
 (function () {
   "use strict";
 
-  /* ---- Constants ---- */
-  const MAX_POINTS = 60;
-  const RECONNECT_MS = 2000;
-  const WS_PATH = "/ws";
+  var MAX_POINTS = 60;
+  var RECONNECT_MS = 2000;
+  var WS_PATH = "/ws";
 
-  /* ---- DOM refs ---- */
-  const $statusDot  = document.getElementById("statusDot");
-  const $statusText = document.getElementById("statusText");
-  const $modeBadge  = document.getElementById("modeBadge");
-  const $errorBar   = document.getElementById("errorBar");
-  const $valTxTput  = document.getElementById("valTxTput");
-  const $valRetry   = document.getElementById("valRetry");
-  const $valTxPer   = document.getElementById("valTxPer");
-  const $valRssi    = document.getElementById("valRssi");
-  const $valMcs     = document.getElementById("valMcs");
-  const $valMcsSub  = document.getElementById("valMcsSub");
-  const $valTemp    = document.getElementById("valTemp");
-  const $detectChip = document.getElementById("detectChip");
-  const $detectScoreVal = document.getElementById("detectScoreVal");
+  /* ---- State ---- */
+  var mode = "live";
+  var totalSamples = 0;
+  var attackStart = -1;
+  var sampleInterval = 0;
+  var currentIndex = 0;
+  var isPlaying = false;
+  var dragging = false;
+
+  /* ---- DOM ---- */
+  var $statusDot    = document.getElementById("statusDot");
+  var $statusText   = document.getElementById("statusText");
+  var $modeBadge    = document.getElementById("modeBadge");
+  var $errorBar     = document.getElementById("errorBar");
+  var $detectStatus = document.getElementById("detectStatus");
+  var $detectScoreVal = document.getElementById("detectScoreVal");
+  var $valTxTput    = document.getElementById("valTxTput");
+  var $valRetry     = document.getElementById("valRetry");
+  var $valTxPer     = document.getElementById("valTxPer");
+  var $valRssi      = document.getElementById("valRssi");
+  var $valMcs       = document.getElementById("valMcs");
+  var $valMcsSub    = document.getElementById("valMcsSub");
+  var $valTemp      = document.getElementById("valTemp");
+
+  /* Playback DOM */
+  var $playbackBar    = document.getElementById("playbackBar");
+  var $pbPlayPause    = document.getElementById("pbPlayPause");
+  var $pbScrubber     = document.getElementById("pbScrubber");
+  var $pbReadout      = document.getElementById("pbReadout");
+  var $pbInterval     = document.getElementById("pbInterval");
+  var $attackMarker   = document.getElementById("attackMarker");
+  var $pbJumpAttack   = document.getElementById("pbJumpAttack");
 
   /* ---- Status helpers ---- */
   function setStatus(state, text) {
-    $statusDot.style.background = state === "ok" ? "#0d3" : state === "warn" ? "#fb0" : "#f55";
+    $statusDot.className = "status-dot" + (state === "ok" ? " ok" : state === "warn" ? " warn" : "");
     $statusText.textContent = text;
   }
 
-  function setMode(mode) {
-    if (mode === "replay") {
-      $modeBadge.textContent = "\u23F5 REPLAY \u2014 demo data";
+  function setMode(m) {
+    mode = m;
+    if (m === "replay") {
+      $modeBadge.textContent = "\u23F5 REPLAY \u00B7 DEMO DATA";
       $modeBadge.classList.add("replay");
     } else {
       $modeBadge.textContent = "\u25CF LIVE";
@@ -354,17 +609,13 @@
   }
 
   function showError(msg) {
-    if (msg) {
-      $errorBar.textContent = msg;
-      $errorBar.classList.add("visible");
-    } else {
-      $errorBar.classList.remove("visible");
-    }
+    if (msg) { $errorBar.textContent = msg; $errorBar.classList.add("visible"); }
+    else { $errorBar.classList.remove("visible"); }
   }
 
-  /* ---- Chart defaults for dark theme ---- */
-  const gridColor = "rgba(255,255,255,0.07)";
-  const tickColor = "#6b7185";
+  /* ---- Chart config ---- */
+  var gridColor = "#1e2430";
+  var tickColor = "#808a9e";
 
   function baseLineOpts(yLabel) {
     return {
@@ -375,126 +626,184 @@
       plugins: {
         legend: {
           display: true,
-          labels: { color: tickColor, boxWidth: 12, font: { size: 11 } }
+          labels: { color: tickColor, boxWidth: 10, font: { family: "'Oswald', sans-serif", size: 10, weight: 600 } }
         }
       },
       scales: {
         x: {
-          ticks: { color: tickColor, maxTicksLimit: 8, font: { size: 10 } },
+          ticks: { color: tickColor, maxTicksLimit: 8, font: { family: "'JetBrains Mono', monospace", size: 10 } },
           grid: { color: gridColor }
         },
         y: {
-          title: { display: !!yLabel, text: yLabel || "", color: tickColor, font: { size: 11 } },
-          ticks: { color: tickColor, font: { size: 10 } },
+          title: { display: !!yLabel, text: yLabel || "", color: tickColor, font: { family: "'Oswald', sans-serif", size: 10, weight: 600 } },
+          ticks: { color: tickColor, font: { family: "'JetBrains Mono', monospace", size: 10 } },
           grid: { color: gridColor }
         }
       }
     };
   }
 
-  /* ---- Create charts ---- */
-  const labels = [];
-
   function makeDataset(label, color) {
     return {
       label: label,
       data: [],
       borderColor: color,
-      backgroundColor: color + "33",
-      borderWidth: 1.8,
+      backgroundColor: color + "22",
+      borderWidth: 1.5,
       pointRadius: 0,
-      tension: 0.25,
+      tension: 0.2,
       fill: false
     };
   }
 
-  const chartTxTput = new Chart(document.getElementById("chartTxTput"), {
+  /* ---- Create charts ---- */
+  var chartTxTput = new Chart(document.getElementById("chartTxTput"), {
     type: "line",
     data: { labels: [], datasets: [makeDataset("TX", "#fb8d24")] },
     options: baseLineOpts("Mbps")
   });
 
-  const chartRetry = new Chart(document.getElementById("chartRetry"), {
+  var chartRetry = new Chart(document.getElementById("chartRetry"), {
     type: "line",
     data: { labels: [], datasets: [makeDataset("Retry Rate", "#fb8d24")] },
     options: baseLineOpts("")
   });
 
-  const chartPer = new Chart(document.getElementById("chartPer"), {
+  var chartPer = new Chart(document.getElementById("chartPer"), {
     type: "line",
-    data: {
-      labels: [],
-      datasets: [
-        makeDataset("TX PER", "#fb8d24"),
-        makeDataset("RX PER", "#4ea8f6")
-      ]
-    },
+    data: { labels: [], datasets: [makeDataset("TX PER", "#fb8d24"), makeDataset("RX PER", "#4ea8f6")] },
     options: baseLineOpts("%")
   });
 
-  const chartRssi = new Chart(document.getElementById("chartRssi"), {
+  var chartRssi = new Chart(document.getElementById("chartRssi"), {
     type: "line",
-    data: {
-      labels: [],
-      datasets: [
-        makeDataset("RSSI 0", "#fb8d24"),
-        makeDataset("RSSI 1", "#4ea8f6"),
-        makeDataset("RSSI 2", "#34d399"),
-        makeDataset("RSSI 3", "#f472b6")
-      ]
-    },
+    data: { labels: [], datasets: [
+      makeDataset("RSSI 0", "#fb8d24"),
+      makeDataset("RSSI 1", "#4ea8f6"),
+      makeDataset("RSSI 2", "#35d07f"),
+      makeDataset("RSSI 3", "#c084fc")
+    ]},
     options: baseLineOpts("dBm")
   });
 
-  const anomalyDsColor = "#0d3";
-  const chartAnomaly = new Chart(document.getElementById("chartAnomaly"), {
+  var chartAnomaly = new Chart(document.getElementById("chartAnomaly"), {
     type: "line",
-    data: {
-      labels: [],
-      datasets: [
-        {
-          label: "Anomaly Score",
-          data: [],
-          borderColor: anomalyDsColor,
-          backgroundColor: "rgba(0,221,51,0.15)",
-          borderWidth: 1.8,
-          pointRadius: 0,
-          tension: 0.25,
-          fill: false,
-          segment: {
-            borderColor: function (ctx) {
-              return ctx.p1.parsed.y < 0 ? "#f55" : "#0d3";
-            }
-          }
-        },
-        {
-          label: "Threshold (0)",
-          data: [],
-          borderColor: "rgba(255,255,255,0.25)",
-          borderWidth: 1,
-          borderDash: [6, 4],
-          pointRadius: 0,
-          fill: false
+    data: { labels: [], datasets: [
+      {
+        label: "Anomaly Score",
+        data: [],
+        borderColor: "#35d07f",
+        backgroundColor: "rgba(53,208,127,0.1)",
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.2,
+        fill: false,
+        segment: {
+          borderColor: function (ctx) { return ctx.p1.parsed.y < 0 ? "#ff4b4b" : "#35d07f"; }
         }
-      ]
-    },
+      },
+      {
+        label: "Threshold (0)",
+        data: [],
+        borderColor: "rgba(255,255,255,0.18)",
+        borderWidth: 1,
+        borderDash: [5, 4],
+        pointRadius: 0,
+        fill: false
+      }
+    ]},
     options: baseLineOpts("")
   });
 
-  const allCharts = [chartTxTput, chartRetry, chartPer, chartRssi, chartAnomaly];
+  var allCharts = [chartTxTput, chartRetry, chartPer, chartRssi, chartAnomaly];
 
-  /* Rolling-window push helper */
+  /* ---- Rolling push ---- */
+  var sampleCount = 0;
+
   function rollingPush(arr, val) {
     arr.push(val);
     if (arr.length > MAX_POINTS) arr.shift();
   }
 
-  /* ---- Sample counter for labels ---- */
-  let sampleCount = 0;
+  function trimCharts() {
+    allCharts.forEach(function (c) {
+      while (c.data.labels.length > MAX_POINTS) {
+        c.data.labels.shift();
+        c.data.datasets.forEach(function (ds) { ds.data.shift(); });
+      }
+    });
+  }
 
-  /* ---- Process incoming telemetry message ---- */
+  /* ---- Playback controls ---- */
+  function sendCmd(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
+
+  $pbPlayPause.addEventListener("click", function () {
+    sendCmd({ cmd: isPlaying ? "pause" : "play" });
+  });
+  document.getElementById("pbSeekStart").addEventListener("click", function () { sendCmd({ cmd: "seek", index: 0 }); });
+  document.getElementById("pbSeekEnd").addEventListener("click", function () { sendCmd({ cmd: "seek", index: totalSamples - 1 }); });
+  document.getElementById("pbStepBack").addEventListener("click", function () { sendCmd({ cmd: "step", dir: -1 }); });
+  document.getElementById("pbStepFwd").addEventListener("click", function () { sendCmd({ cmd: "step", dir: 1 }); });
+  $pbJumpAttack.addEventListener("click", function () { sendCmd({ cmd: "seek", index: attackStart }); });
+
+  $pbScrubber.addEventListener("input", function () {
+    dragging = true;
+    var idx = parseInt($pbScrubber.value, 10);
+    $pbReadout.textContent = idx + " / " + totalSamples;
+  });
+  $pbScrubber.addEventListener("change", function () {
+    var idx = parseInt($pbScrubber.value, 10);
+    sendCmd({ cmd: "seek", index: idx });
+    dragging = false;
+  });
+
+  function updatePlaybackUI(d) {
+    isPlaying = d.playing;
+    $pbPlayPause.innerHTML = d.playing ? "&#9646;&#9646;" : "&#9654;";
+    currentIndex = d.index;
+    $pbReadout.textContent = d.index + " / " + d.total;
+    if (!dragging) {
+      $pbScrubber.value = d.index;
+    }
+  }
+
+  function applyMeta(meta) {
+    setMode(meta.mode);
+    totalSamples = meta.total;
+    attackStart = meta.attack_start;
+    sampleInterval = meta.interval;
+
+    $pbScrubber.max = Math.max(0, totalSamples - 1);
+
+    if (meta.mode === "replay") {
+      $playbackBar.classList.add("visible");
+      $pbInterval.textContent = meta.interval.toFixed(1) + "s";
+    } else {
+      $playbackBar.classList.remove("visible");
+    }
+
+    if (attackStart >= 0 && totalSamples > 0) {
+      var pct = (attackStart / totalSamples) * 100;
+      $attackMarker.style.display = "block";
+      $attackMarker.style.left = pct + "%";
+      $pbJumpAttack.style.display = "inline-block";
+    } else {
+      $attackMarker.style.display = "none";
+      $pbJumpAttack.style.display = "none";
+    }
+  }
+
+  /* ---- Handle telemetry sample ---- */
   function handleMessage(d) {
-    /* Update stat tiles */
+    if (d.type === "meta") {
+      applyMeta(d);
+      return;
+    }
+
     $valTxTput.textContent = d.throughput_tx_mbps.toFixed(1);
     $valRetry.textContent  = d.retry_rate.toFixed(3);
     $valTxPer.textContent  = d.tx_per_pct.toFixed(2);
@@ -503,20 +812,18 @@
 
     if (d.tx_mcs !== null && d.tx_mcs !== undefined) {
       $valMcs.textContent = d.tx_mcs;
-      let sub = [];
-      if (d.tx_nss !== null)      sub.push(d.tx_nss + "SS");
-      if (d.tx_bw !== null)       sub.push(d.tx_bw);
-      if (d.tx_phymode !== null)  sub.push(d.tx_phymode);
-      $valMcsSub.textContent = sub.join(" · ");
+      var sub = [];
+      if (d.tx_nss !== null)     sub.push(d.tx_nss + "SS");
+      if (d.tx_bw !== null)      sub.push(d.tx_bw);
+      if (d.tx_phymode !== null) sub.push(d.tx_phymode);
+      $valMcsSub.textContent = sub.join(" \u00B7 ");
     } else {
       $valMcs.textContent = "-";
       $valMcsSub.textContent = "";
     }
 
-    /* Mode badge */
     setMode(d.mode);
 
-    /* Error handling — show error but keep chart data */
     if (d.status === "error") {
       setStatus("error", "Error");
       showError(d.error || "Unknown error from telemetry stream");
@@ -525,73 +832,62 @@
       showError(null);
     }
 
-    /* Push data to charts (rolling window) */
-    sampleCount++;
-    const lbl = sampleCount;
-    rollingPush(labels, lbl);
+    /* Detection panel */
+    if (d.anomaly_score === null || d.anomaly_score === undefined) {
+      $detectStatus.className = "detect-status offline";
+      $detectStatus.textContent = "DETECTOR OFFLINE";
+      $detectScoreVal.textContent = "\u2014";
+    } else if (d.is_anomaly) {
+      $detectStatus.className = "detect-status attack";
+      $detectStatus.textContent = "ATTACK DETECTED";
+      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
+    } else {
+      $detectStatus.className = "detect-status normal";
+      $detectStatus.textContent = "NORMAL";
+      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
+    }
 
-    /* TX Throughput */
+    /* Playback state */
+    if (d.index !== undefined) {
+      updatePlaybackUI(d);
+    }
+
+    /* Push to charts */
+    sampleCount++;
+    var lbl = sampleCount;
     rollingPush(chartTxTput.data.labels, lbl);
     rollingPush(chartTxTput.data.datasets[0].data, d.throughput_tx_mbps);
 
-    /* Retry Rate */
     rollingPush(chartRetry.data.labels, lbl);
     rollingPush(chartRetry.data.datasets[0].data, d.retry_rate);
 
-    /* PER */
     rollingPush(chartPer.data.labels, lbl);
     rollingPush(chartPer.data.datasets[0].data, d.tx_per_pct);
     rollingPush(chartPer.data.datasets[1].data, d.rx_per_pct);
 
-    /* RSSI */
     rollingPush(chartRssi.data.labels, lbl);
     rollingPush(chartRssi.data.datasets[0].data, d.rssi0);
     rollingPush(chartRssi.data.datasets[1].data, d.rssi1);
     rollingPush(chartRssi.data.datasets[2].data, d.rssi2);
     rollingPush(chartRssi.data.datasets[3].data, d.rssi3);
 
-    /* Anomaly score */
     if (d.anomaly_score !== null && d.anomaly_score !== undefined) {
       rollingPush(chartAnomaly.data.labels, lbl);
       rollingPush(chartAnomaly.data.datasets[0].data, d.anomaly_score);
       rollingPush(chartAnomaly.data.datasets[1].data, 0);
     }
 
-    /* Detection panel */
-    if (d.anomaly_score === null || d.anomaly_score === undefined) {
-      $detectChip.className = "detect-chip off";
-      $detectChip.textContent = "detector: off";
-      $detectScoreVal.textContent = "\u2014";
-    } else if (d.is_anomaly) {
-      $detectChip.className = "detect-chip attack";
-      $detectChip.textContent = "\uD83D\uDEA8 ATTACK DETECTED";
-      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
-    } else {
-      $detectChip.className = "detect-chip normal";
-      $detectChip.textContent = "\u2713 NORMAL";
-      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
-    }
-
-    /* Trim label arrays to MAX_POINTS */
-    allCharts.forEach(function (c) {
-      while (c.data.labels.length > MAX_POINTS) {
-        c.data.labels.shift();
-        c.data.datasets.forEach(function (ds) { ds.data.shift(); });
-      }
-    });
-
-    /* Redraw without animation */
+    trimCharts();
     allCharts.forEach(function (c) { c.update("none"); });
   }
 
-  /* ---- WebSocket connection with auto-reconnect ---- */
-  let ws = null;
-  let reconnectTimer = null;
+  /* ---- WebSocket ---- */
+  var ws = null;
+  var reconnectTimer = null;
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-
-    setStatus("warn", "Connecting…");
+    setStatus("warn", "Connecting\u2026");
     showError(null);
 
     var proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -631,9 +927,7 @@
     }, RECONNECT_MS);
   }
 
-  /* ---- Kick off ---- */
   connect();
-
 })();
 </script>
 </body>

@@ -42,6 +42,15 @@ try:
 except Exception:
     DETECTOR = None
 
+# ── replay playback state ─────────────────────────────────────────────────
+PLAYBACK: dict = {
+    "idx": 0,
+    "paused": False,
+    "rows": [],
+    "total": 0,
+    "attack_start": -1,
+}
+
 
 def score_sample(msg: dict) -> tuple[float | None, bool]:
     """Return (anomaly_score, is_anomaly) using the trained IsolationForest."""
@@ -96,6 +105,9 @@ def _build_message(
         "temp_c": temp_c,
         "anomaly_score": None,
         "is_anomaly": False,
+        "index": 0,
+        "total": 0,
+        "playing": True,
     }
 
 
@@ -112,6 +124,38 @@ async def _broadcast(msg: dict) -> None:
             dead.append(ws)
     for ws in dead:
         clients.discard(ws)
+
+
+# ── replay: build+score+broadcast current PLAYBACK row (shared helper) ────
+async def _replay_broadcast_current() -> None:
+    """Build a message from PLAYBACK.rows[PLAYBACK.idx], score it, broadcast."""
+    row = PLAYBACK["rows"][PLAYBACK["idx"]]
+    msg = _build_message(
+        mode="replay",
+        status="ok",
+        error=None,
+        throughput_tx_mbps=float(row["throughput_tx_mbps"]),
+        throughput_rx_mbps=float(row["throughput_rx_mbps"]),
+        retry_rate=float(row["retry_rate"]),
+        tx_per_pct=float(row["tx_per_pct"]),
+        rx_per_pct=float(row["rx_per_pct"]),
+        rssi0=int(float(row["rssi0"])),
+        rssi1=int(float(row["rssi1"])),
+        rssi2=int(float(row["rssi2"])),
+        rssi3=int(float(row["rssi3"])),
+        tx_mcs=int(float(row["tx_mcs"])) if row.get("tx_mcs") else None,
+        tx_nss=int(float(row["tx_nss"])) if row.get("tx_nss") else None,
+        tx_bw=row.get("tx_bw") or None,
+        tx_phymode=row.get("tx_phymode") or None,
+        temp_c=int(float(row["temp_c"])),
+    )
+    score, is_anom = score_sample(msg)
+    msg["anomaly_score"] = score
+    msg["is_anomaly"] = is_anom
+    msg["index"] = PLAYBACK["idx"]
+    msg["total"] = PLAYBACK["total"]
+    msg["playing"] = not PLAYBACK["paused"]
+    await _broadcast(msg)
 
 
 # ── producer: live mode ───────────────────────────────────────────────────
@@ -209,33 +253,20 @@ async def _producer_replay() -> None:
         for row in csv.DictReader(f):
             rows.append(row)
 
-    idx = 0
+    PLAYBACK["rows"] = rows
+    PLAYBACK["total"] = len(rows)
+    PLAYBACK["attack_start"] = -1
+    for i, r in enumerate(rows):
+        if r.get("label") == "attack":
+            PLAYBACK["attack_start"] = i
+            break
+    PLAYBACK["idx"] = 0
+    PLAYBACK["paused"] = False
+
     while True:
-        row = rows[idx % len(rows)]
-        msg = _build_message(
-            mode="replay",
-            status="ok",
-            error=None,
-            throughput_tx_mbps=float(row["throughput_tx_mbps"]),
-            throughput_rx_mbps=float(row["throughput_rx_mbps"]),
-            retry_rate=float(row["retry_rate"]),
-            tx_per_pct=float(row["tx_per_pct"]),
-            rx_per_pct=float(row["rx_per_pct"]),
-            rssi0=int(float(row["rssi0"])),
-            rssi1=int(float(row["rssi1"])),
-            rssi2=int(float(row["rssi2"])),
-            rssi3=int(float(row["rssi3"])),
-            tx_mcs=int(float(row["tx_mcs"])) if row.get("tx_mcs") else None,
-            tx_nss=int(float(row["tx_nss"])) if row.get("tx_nss") else None,
-            tx_bw=row.get("tx_bw") or None,
-            tx_phymode=row.get("tx_phymode") or None,
-            temp_c=int(float(row["temp_c"])),
-        )
-        score, is_anom = score_sample(msg)
-        msg["anomaly_score"] = score
-        msg["is_anomaly"] = is_anom
-        await _broadcast(msg)
-        idx += 1
+        await _replay_broadcast_current()
+        if not PLAYBACK["paused"]:
+            PLAYBACK["idx"] = (PLAYBACK["idx"] + 1) % PLAYBACK["total"]
         await asyncio.sleep(args.interval)
 
 
@@ -255,14 +286,56 @@ async def _homepage(request):
     return FileResponse(_HERE / "dashboard.html")
 
 
+async def _ml_page(request):
+    return FileResponse(_HERE / "ml.html")
+
+
 async def _ws_handler(websocket: WebSocket) -> None:
     await websocket.accept()
     clients.add(websocket)
+    total = PLAYBACK["total"] if args.mode == "replay" else 0
+    attack_start = PLAYBACK["attack_start"] if args.mode == "replay" else -1
+    meta = {
+        "type": "meta",
+        "mode": args.mode,
+        "total": total,
+        "attack_start": attack_start,
+        "interval": args.interval,
+    }
+    await websocket.send_text(json.dumps(meta))
     if latest_sample is not None:
         await websocket.send_text(json.dumps(latest_sample))
     try:
         while True:
-            await websocket.receive_text()  # keep alive; ignore payloads
+            raw = await websocket.receive_text()
+            try:
+                cmd = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(cmd, dict):
+                continue
+            if args.mode != "replay":
+                continue
+            c = cmd.get("cmd")
+            if c == "pause":
+                PLAYBACK["paused"] = True
+            elif c == "play":
+                PLAYBACK["paused"] = False
+            elif c == "step":
+                d = cmd.get("dir", 1)
+                if d not in (1, -1):
+                    d = 1
+                PLAYBACK["paused"] = True
+                if PLAYBACK["total"] > 0:
+                    PLAYBACK["idx"] = (PLAYBACK["idx"] + d) % PLAYBACK["total"]
+                    await _replay_broadcast_current()
+            elif c == "seek":
+                n = cmd.get("index")
+                if isinstance(n, (int, float)):
+                    n = int(n)
+                    if PLAYBACK["total"] > 0:
+                        PLAYBACK["idx"] = max(0, min(n, PLAYBACK["total"] - 1))
+                        await _replay_broadcast_current()
     except Exception:
         pass
     finally:
@@ -273,6 +346,7 @@ async def _ws_handler(websocket: WebSocket) -> None:
 app = Starlette(
     routes=[
         Route("/", _homepage),
+        Route("/ml", _ml_page),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
     ],

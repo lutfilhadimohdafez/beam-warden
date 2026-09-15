@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BEAM // WARDEN — ML Engine</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css">
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151d;
+    --panel-2: #171b25;
+    --border: #242a38;
+    --accent: #fb8d24;
+    --accent-2: #f5620a;
+    --text: #eef1f6;
+    --muted: #808a9e;
+    --ok: #35d07f;
+    --danger: #ff4b4b;
+    --grid: #1e2430;
+    --font-display: 'Oswald', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+    position: relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 200px;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 20px 60px;
+  }
+
+  /* ---- HEADER ---- */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 0 14px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+  .header-left { display: flex; flex-direction: column; gap: 2px; }
+  .wordmark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .wordmark .warden { color: var(--accent); }
+  .wordmark .sep { color: var(--muted); margin: 0 2px; }
+  .subtitle {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .nav-link {
+    font-family: var(--font-display);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .nav-link:hover { color: var(--accent); }
+
+  /* ---- SECTION ---- */
+  .section {
+    margin-bottom: 36px;
+  }
+  .section-head {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-bottom: 6px;
+    padding-left: 16px;
+    position: relative;
+  }
+  .section-head::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .section-sub {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  /* ---- PANEL ---- */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+  .panel-accent-top {
+    border-top: 2px solid var(--accent);
+  }
+
+  /* ---- BODY TEXT ---- */
+  .body-text {
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 400;
+    line-height: 1.7;
+    color: var(--text);
+    letter-spacing: 0.01em;
+  }
+  .body-text strong {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .body-text code {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 1px 5px;
+    color: var(--accent);
+  }
+
+  /* ---- TABLE ---- */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  .data-table thead th {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .data-table tbody td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(36,42,56,0.5);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  .data-table .feat-name {
+    color: var(--accent);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .data-table .feat-behavior { color: var(--muted); }
+
+  /* ---- PIPELINE ---- */
+  .pipeline {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--muted);
+    white-space: pre;
+    overflow-x: auto;
+    padding: 16px 0;
+  }
+  .pipeline .hl { color: var(--accent); font-weight: 500; }
+  .pipeline .dim { color: #4a5168; }
+
+  /* ---- STAT ROWS ---- */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+  }
+  .stat-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 16px;
+  }
+  .stat-card-label {
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .stat-card-value {
+    font-family: var(--font-mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .stat-card-value.ok { color: var(--ok); }
+  .stat-card-value.danger { color: var(--danger); }
+  .stat-card-note {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="wordmark">BEAM <span class="sep">//</span> <span class="warden">WARDEN</span></div>
+      <div class="subtitle">ML Anomaly Detection Engine</div>
+    </div>
+    <div class="header-right">
+      <a href="/tools/dashboard.html" class="nav-link">&larr; DASHBOARD</a>
+    </div>
+  </div>
+
+  <!-- WHY ISOLATION FOREST -->
+  <div class="section">
+    <div class="section-head">Why Isolation Forest</div>
+    <div class="section-sub">Unsupervised anomaly detection for WiFi telemetry</div>
+    <div class="panel panel-accent-top">
+      <p class="body-text">
+        <strong>Isolation Forest</strong> is an unsupervised algorithm that isolates anomalies by random partitioning.
+        Unlike supervised classifiers, it trains on <strong>normal traffic only</strong> &mdash; no labelled attack data required.
+        Anomalies are isolated in fewer splits because they are rare and distinct, yielding a short average path length.
+      </p>
+      <br>
+      <p class="body-text">
+        The short-path intuition: a point that is easy to isolate (few splits) is likely anomalous.
+        The <code>decision_function</code> returns a score where <strong>&gt;0 = normal</strong>, <strong>&lt;0 = anomaly</strong>.
+        This makes it effective for catching <strong>previously unseen attack patterns</strong> without retraining.
+      </p>
+    </div>
+  </div>
+
+  <!-- PARAMETERS -->
+  <div class="section">
+    <div class="section-head">Model Parameters</div>
+    <div class="section-sub">Training configuration</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-card-label">Estimators</div>
+        <div class="stat-card-value">200</div>
+        <div class="stat-card-note">Number of isolation trees</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Contamination</div>
+        <div class="stat-card-value">0.02</div>
+        <div class="stat-card-note">Expected anomaly ratio in training set</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Scaler</div>
+        <div class="stat-card-value">StandardScaler</div>
+        <div class="stat-card-note">Zero-mean, unit-variance normalisation</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Features</div>
+        <div class="stat-card-value">11</div>
+        <div class="stat-card-note">WiFi telemetry variables</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- THE 11 VARIABLES -->
+  <div class="section">
+    <div class="section-head">The 11 Variables</div>
+    <div class="section-sub">Feature set and expected behaviour under attack</div>
+    <div class="panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Feature</th>
+            <th>Normal</th>
+            <th>Under Attack</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td class="feat-name">throughput_tx_mbps</td>
+            <td class="feat-behavior">Stable, link-rate dependent</td>
+            <td class="feat-behavior">Collapses &mdash; channel saturated</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td class="feat-name">throughput_rx_mbps</td>
+            <td class="feat-behavior">Stable</td>
+            <td class="feat-behavior">Collapses &mdash; AP overwhelmed</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td class="feat-name">retry_rate</td>
+            <td class="feat-behavior">Low, near zero</td>
+            <td class="feat-behavior">Spikes &mdash; frame collisions increase</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td class="feat-name">tx_per_pct</td>
+            <td class="feat-behavior">Low &lt;5%</td>
+            <td class="feat-behavior">Spikes &mdash; corrupted frames</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td class="feat-name">rx_per_pct</td>
+            <td class="feat-behavior">Low &lt;5%</td>
+            <td class="feat-behavior">Spikes &mdash; interference/jamming</td>
+          </tr>
+          <tr>
+            <td>6</td>
+            <td class="feat-name">rssi0</td>
+            <td class="feat-behavior">Stable per location</td>
+            <td class="feat-behavior">Shifts &mdash; jammer injection</td>
+          </tr>
+          <tr>
+            <td>7</td>
+            <td class="feat-name">rssi1</td>
+            <td class="feat-behavior">Stable</td>
+            <td class="feat-behavior">Shifts</td>
+          </tr>
+          <tr>
+            <td>8</td>
+            <td class="feat-name">rssi2</td>
+            <td class="feat-behavior">Stable</td>
+            <td class="feat-behavior">Shifts</td>
+          </tr>
+          <tr>
+            <td>9</td>
+            <td class="feat-name">rssi3</td>
+            <td class="feat-behavior">Stable</td>
+            <td class="feat-behavior">Shifts</td>
+          </tr>
+          <tr>
+            <td>10</td>
+            <td class="feat-name">tx_mcs</td>
+            <td class="feat-behavior">High (7&ndash;11)</td>
+            <td class="feat-behavior">Drops &mdash; rate adaptation fallback</td>
+          </tr>
+          <tr>
+            <td>11</td>
+            <td class="feat-name">tx_nss</td>
+            <td class="feat-behavior">Max spatial streams</td>
+            <td class="feat-behavior">May drop &mdash; link degradation</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="section">
+    <div class="section-head">Pipeline</div>
+    <div class="section-sub">Data flow from raw telemetry to dashboard alert</div>
+    <div class="panel panel-accent-top">
+      <div class="pipeline"><span class="hl">WiFi Telemetry</span>   (iw / hostapd / nl80211)
+       │
+       ▼
+<span class="hl">11 Raw Features</span>   extracted per sample
+       │
+       ▼
+<span class="hl">StandardScaler</span>    z-score normalisation
+       │               (zero mean, unit variance)
+       ▼
+<span class="hl">IsolationForest</span>   200 trees, contamination=0.02
+       │               decision_function(x) → score
+       ▼
+<span class="hl">Score</span>             &gt; 0  →  <span class="dim">NORMAL</span>
+       │               &lt; 0  →  <span class="hl">ANOMALY</span>
+       ▼
+<span class="hl">predict()</span>         1 = normal, -1 = anomaly
+       │
+       ▼
+<span class="hl">Dashboard Alert</span>   WebSocket push → UI update</div>
+    </div>
+  </div>
+
+  <!-- STATUS -->
+  <div class="section">
+    <div class="section-head">Status</div>
+    <div class="section-sub">Current detection performance</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-card-label">Normal Traffic</div>
+        <div class="stat-card-value ok">~2%</div>
+        <div class="stat-card-note">Flagged (false-positive floor)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Synthetic Attack</div>
+        <div class="stat-card-value ok">100%</div>
+        <div class="stat-card-note">Flagged (scripted injection)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Real Attack Target</div>
+        <div class="stat-card-value">≥55%</div>
+        <div class="stat-card-note">Requires real attack telemetry data</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Detection Mode</div>
+        <div class="stat-card-value">Unsupervised</div>
+        <div class="stat-card-note">Trains on normal traffic only</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NOTES -->
+  <div class="section">
+    <div class="section-head">Notes</div>
+    <div class="panel">
+      <p class="body-text">
+        The model is trained offline on collected normal-mode telemetry. The <code>StandardScaler</code> is fitted
+        on the same training set and serialised alongside the forest. At inference time, each incoming sample is
+        scaled and scored; the raw <code>decision_function</code> value is pushed over the WebSocket as
+        <code>anomaly_score</code> and the binary verdict as <code>is_anomaly</code>.
+      </p>
+      <br>
+      <p class="body-text">
+        Synthetic attack replay (deauth/CSMA flooding) achieves 100% detection because the injected traffic is
+        statistically extreme. Real-world accuracy (≥55% target) depends on capturing genuine attack telemetry
+        &mdash; the model's <code>contamination=0.02</code> threshold is calibrated for a low false-positive rate
+        on normal WiFi environments.
+      </p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
