@@ -15,6 +15,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import joblib
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gn630v_telemetry import compute_deltas, parse_iwpriv_stat
@@ -31,6 +34,24 @@ clients: set[WebSocket] = set()
 latest_sample: dict | None = None
 
 _HERE = Path(__file__).resolve().parent
+
+# ── ML anomaly detector (loaded once at import) ────────────────────────────
+_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "detector.joblib"
+try:
+    DETECTOR: dict | None = joblib.load(_MODEL_PATH)
+except Exception:
+    DETECTOR = None
+
+
+def score_sample(msg: dict) -> tuple[float | None, bool]:
+    """Return (anomaly_score, is_anomaly) using the trained IsolationForest."""
+    if DETECTOR is None:
+        return (None, False)
+    feats = [[float(msg.get(f, 0) or 0) for f in DETECTOR["features"]]]
+    X = DETECTOR["scaler"].transform(np.array(feats))
+    score = float(DETECTOR["model"].decision_function(X)[0])
+    is_anom = bool(DETECTOR["model"].predict(X)[0] == -1)
+    return (score, is_anom)
 
 
 # ── message builder (shared by live & replay) ─────────────────────────────
@@ -73,6 +94,8 @@ def _build_message(
         "tx_bw": tx_bw,
         "tx_phymode": tx_phymode,
         "temp_c": temp_c,
+        "anomaly_score": None,
+        "is_anomaly": False,
     }
 
 
@@ -135,6 +158,9 @@ async def _producer_live() -> None:
                 tx_phymode=parsed["tx_phymode"],
                 temp_c=parsed["temp_c"],
             )
+            score, is_anom = score_sample(msg)
+            msg["anomaly_score"] = score
+            msg["is_anomaly"] = is_anom
             await _broadcast(msg)
 
             prev = parsed
@@ -195,16 +221,19 @@ async def _producer_replay() -> None:
             retry_rate=float(row["retry_rate"]),
             tx_per_pct=float(row["tx_per_pct"]),
             rx_per_pct=float(row["rx_per_pct"]),
-            rssi0=int(row["rssi0"]),
-            rssi1=int(row["rssi1"]),
-            rssi2=int(row["rssi2"]),
-            rssi3=int(row["rssi3"]),
-            tx_mcs=int(row["tx_mcs"]) if row.get("tx_mcs") else None,
-            tx_nss=int(row["tx_nss"]) if row.get("tx_nss") else None,
+            rssi0=int(float(row["rssi0"])),
+            rssi1=int(float(row["rssi1"])),
+            rssi2=int(float(row["rssi2"])),
+            rssi3=int(float(row["rssi3"])),
+            tx_mcs=int(float(row["tx_mcs"])) if row.get("tx_mcs") else None,
+            tx_nss=int(float(row["tx_nss"])) if row.get("tx_nss") else None,
             tx_bw=row.get("tx_bw") or None,
             tx_phymode=row.get("tx_phymode") or None,
-            temp_c=int(row["temp_c"]),
+            temp_c=int(float(row["temp_c"])),
         )
+        score, is_anom = score_sample(msg)
+        msg["anomaly_score"] = score
+        msg["is_anomaly"] = is_anom
         await _broadcast(msg)
         idx += 1
         await asyncio.sleep(args.interval)

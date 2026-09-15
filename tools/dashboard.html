@@ -86,8 +86,72 @@
     transition: background 0.3s, color 0.3s;
   }
   .mode-badge.replay {
-    background: #3a3f4e;
-    color: #aaa;
+    background: #f59e0b;
+    color: #000;
+    font-size: 0.95rem;
+    padding: 6px 20px;
+    box-shadow: 0 0 14px rgba(245,158,11,0.45);
+    letter-spacing: 0.1em;
+  }
+
+  /* Detection panel */
+  .detect-panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .detect-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 22px;
+    border-radius: 9999px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .detect-chip.normal {
+    background: rgba(0,221,51,0.15);
+    color: #0d3;
+    border: 1px solid rgba(0,221,51,0.3);
+  }
+  .detect-chip.attack {
+    background: rgba(255,68,68,0.18);
+    color: #f55;
+    border: 1px solid rgba(255,68,68,0.4);
+    animation: pulse-red 1.2s ease-in-out infinite;
+  }
+  .detect-chip.off {
+    background: rgba(139,145,160,0.12);
+    color: #6b7185;
+    border: 1px solid rgba(139,145,160,0.2);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,68,68,0.4); }
+    50% { box-shadow: 0 0 18px 4px rgba(255,68,68,0.35); }
+  }
+  .detect-score {
+    text-align: center;
+  }
+  .detect-score-val {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .detect-score-caption {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    max-width: 220px;
+    line-height: 1.3;
   }
 
   /* Error bar */
@@ -185,6 +249,15 @@
   <!-- Error bar -->
   <div class="error-bar" id="errorBar"></div>
 
+  <!-- Detection panel -->
+  <div class="detect-panel">
+    <div class="detect-chip off" id="detectChip">detector: off</div>
+    <div class="detect-score">
+      <div class="detect-score-val" id="detectScoreVal">—</div>
+      <div class="detect-score-caption">IsolationForest score (&gt;0 normal, &lt;0 anomalous)</div>
+    </div>
+  </div>
+
   <!-- Stat tiles -->
   <div class="tiles">
     <div class="tile">
@@ -232,6 +305,10 @@
       <div class="chart-title">RSSI per chain (dBm)</div>
       <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
     </div>
+    <div class="chart-card">
+      <div class="chart-title">Anomaly Score</div>
+      <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
+    </div>
   </div>
 </div>
 
@@ -257,6 +334,8 @@
   const $valMcs     = document.getElementById("valMcs");
   const $valMcsSub  = document.getElementById("valMcsSub");
   const $valTemp    = document.getElementById("valTemp");
+  const $detectChip = document.getElementById("detectChip");
+  const $detectScoreVal = document.getElementById("detectScoreVal");
 
   /* ---- Status helpers ---- */
   function setStatus(state, text) {
@@ -266,10 +345,10 @@
 
   function setMode(mode) {
     if (mode === "replay") {
-      $modeBadge.textContent = "REPLAY";
+      $modeBadge.textContent = "\u23F5 REPLAY \u2014 demo data";
       $modeBadge.classList.add("replay");
     } else {
-      $modeBadge.textContent = "LIVE";
+      $modeBadge.textContent = "\u25CF LIVE";
       $modeBadge.classList.remove("replay");
     }
   }
@@ -367,7 +446,42 @@
     options: baseLineOpts("dBm")
   });
 
-  const allCharts = [chartTxTput, chartRetry, chartPer, chartRssi];
+  const anomalyDsColor = "#0d3";
+  const chartAnomaly = new Chart(document.getElementById("chartAnomaly"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: "Anomaly Score",
+          data: [],
+          borderColor: anomalyDsColor,
+          backgroundColor: "rgba(0,221,51,0.15)",
+          borderWidth: 1.8,
+          pointRadius: 0,
+          tension: 0.25,
+          fill: false,
+          segment: {
+            borderColor: function (ctx) {
+              return ctx.p1.parsed.y < 0 ? "#f55" : "#0d3";
+            }
+          }
+        },
+        {
+          label: "Threshold (0)",
+          data: [],
+          borderColor: "rgba(255,255,255,0.25)",
+          borderWidth: 1,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false
+        }
+      ]
+    },
+    options: baseLineOpts("")
+  });
+
+  const allCharts = [chartTxTput, chartRetry, chartPer, chartRssi, chartAnomaly];
 
   /* Rolling-window push helper */
   function rollingPush(arr, val) {
@@ -435,6 +549,28 @@
     rollingPush(chartRssi.data.datasets[1].data, d.rssi1);
     rollingPush(chartRssi.data.datasets[2].data, d.rssi2);
     rollingPush(chartRssi.data.datasets[3].data, d.rssi3);
+
+    /* Anomaly score */
+    if (d.anomaly_score !== null && d.anomaly_score !== undefined) {
+      rollingPush(chartAnomaly.data.labels, lbl);
+      rollingPush(chartAnomaly.data.datasets[0].data, d.anomaly_score);
+      rollingPush(chartAnomaly.data.datasets[1].data, 0);
+    }
+
+    /* Detection panel */
+    if (d.anomaly_score === null || d.anomaly_score === undefined) {
+      $detectChip.className = "detect-chip off";
+      $detectChip.textContent = "detector: off";
+      $detectScoreVal.textContent = "\u2014";
+    } else if (d.is_anomaly) {
+      $detectChip.className = "detect-chip attack";
+      $detectChip.textContent = "\uD83D\uDEA8 ATTACK DETECTED";
+      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
+    } else {
+      $detectChip.className = "detect-chip normal";
+      $detectChip.textContent = "\u2713 NORMAL";
+      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
+    }
 
     /* Trim label arrays to MAX_POINTS */
     allCharts.forEach(function (c) {
