@@ -1061,6 +1061,8 @@
   <div class="tab-bar stagger">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="command-center">Command Center</button>
+    <button class="tab-btn" data-tab="learning">Learning</button>
+    <a href="/ml" class="nav-link" style="margin-left:auto;">ML Engine &rarr;</a>
   </div>
 
   <!-- ======== DASHBOARD TAB ======== -->
@@ -1269,6 +1271,101 @@
     </div>
 
   </div><!-- /tab-command-center -->
+
+  <!-- ======== LEARNING TAB ======== -->
+  <div class="tab-section" id="tab-learning">
+
+    <div class="section-label stagger">MODEL STATUS</div>
+    <div class="mc-section stagger" id="learnModelCard">
+      <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:12px;">
+        Trained on a busy link; recalibrate to teach it THIS environment's normal.
+      </div>
+      <div class="mc-params" id="learnModelParams">
+        <div class="mc-param">
+          <label>Model Loaded</label>
+          <input id="learnModelLoaded" value="—" readonly style="width:80px;">
+        </div>
+        <div class="mc-param">
+          <label>Features</label>
+          <input id="learnFeatures" value="—" readonly style="width:220px;">
+        </div>
+        <div class="mc-param">
+          <label>Training Samples</label>
+          <input id="learnSamples" value="—" readonly style="width:100px;">
+        </div>
+        <div class="mc-param">
+          <label>Contamination</label>
+          <input id="learnContamination" value="—" readonly style="width:80px;">
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label stagger">LEARNED NORMAL PROFILE</div>
+    <div class="mc-section stagger">
+      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:12px;">
+        This is what the model thinks "normal" looks like (per-feature mean, min–max).
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="learnProfileTable" style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:0.72rem;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:600;">Feature</th>
+              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Mean</th>
+              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Min</th>
+              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Max</th>
+              <th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:600;width:40%;">Range</th>
+            </tr>
+          </thead>
+          <tbody id="learnProfileBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-label stagger">CALIBRATION</div>
+    <div class="mc-section stagger">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);" id="learnCalibLabel">0 / 150</span>
+            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);" id="learnCalibAuto">auto: off</span>
+          </div>
+          <div style="background:var(--border);height:8px;position:relative;">
+            <div id="learnCalibBar" style="background:var(--ok);height:100%;width:0%;transition:width 0.3s;"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="mc-btn run" id="learnCaptureBtn">Capture Current</button>
+          <button class="mc-btn" id="learnAutoBtn">Auto-capture: OFF</button>
+          <button class="mc-btn" id="learnRetrainBtn" disabled>Retrain</button>
+          <button class="mc-btn stop" id="learnResetBtn">Reset</button>
+        </div>
+      </div>
+      <div id="learnTrainResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);"></div>
+    </div>
+
+    <div class="section-label stagger">LIVE MATCH METER</div>
+    <div class="mc-section stagger">
+      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:10px;">
+        Rolling match rate: how well current traffic matches the learned normal (last 60 samples).
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="flex:1;">
+          <div style="background:var(--border);height:14px;position:relative;">
+            <div id="learnMatchBar" style="background:var(--ok);height:100%;width:50%;transition:width 0.3s;"></div>
+          </div>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-bright);min-width:60px;text-align:right;" id="learnMatchVal">—</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);">haywire</span>
+        <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);">calibrated</span>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);margin-top:8px;">
+        Anomaly rate: <span id="learnAnomalyRate">—</span> &middot; Samples in window: <span id="learnAnomalyWindow">0</span>
+      </div>
+    </div>
+
+  </div><!-- /tab-learning -->
 
 </div>
 
@@ -1676,6 +1773,10 @@
       rfUpdateTitle();
       return;
     }
+    if (d.type === "calib") {
+      learnUpdateCalib(d.count, d.target);
+      return;
+    }
 
     /* Router feed: stream raw output */
     if (d.raw) rfAddLine(d.raw);
@@ -1989,6 +2090,200 @@
   }).catch(function () {
     $mcGrid.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.72rem;">Failed to load /tasks</div>';
   });
+
+  /* ---- LEARNING TAB ---- */
+  var learnAutoCapture = false;
+  var learnCalibCount = 0;
+  var learnCalibTarget = 150;
+  var learnCalibMin = 30;
+
+  var $learnModelLoaded   = document.getElementById("learnModelLoaded");
+  var $learnFeatures      = document.getElementById("learnFeatures");
+  var $learnSamples       = document.getElementById("learnSamples");
+  var $learnContamination = document.getElementById("learnContamination");
+  var $learnProfileBody   = document.getElementById("learnProfileBody");
+  var $learnCalibLabel    = document.getElementById("learnCalibLabel");
+  var $learnCalibAuto     = document.getElementById("learnCalibAuto");
+  var $learnCalibBar      = document.getElementById("learnCalibBar");
+  var $learnCaptureBtn    = document.getElementById("learnCaptureBtn");
+  var $learnAutoBtn       = document.getElementById("learnAutoBtn");
+  var $learnRetrainBtn    = document.getElementById("learnRetrainBtn");
+  var $learnResetBtn      = document.getElementById("learnResetBtn");
+  var $learnTrainResult   = document.getElementById("learnTrainResult");
+  var $learnMatchBar      = document.getElementById("learnMatchBar");
+  var $learnMatchVal      = document.getElementById("learnMatchVal");
+  var $learnAnomalyRate   = document.getElementById("learnAnomalyRate");
+  var $learnAnomalyWindow = document.getElementById("learnAnomalyWindow");
+
+  function learnFetchStatus() {
+    fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
+      $learnModelLoaded.textContent = d.model_loaded ? "YES" : "NO";
+      $learnModelLoaded.style.color = d.model_loaded ? "var(--ok)" : "var(--danger)";
+      $learnFeatures.textContent = d.features.join(", ") || "—";
+      $learnSamples.textContent = d.n_samples || "—";
+      $learnContamination.textContent = d.contamination !== null ? d.contamination : "—";
+      learnCalibCount = d.calib_count || 0;
+      learnCalibTarget = d.calib_target || 150;
+      learnAutoCapture = d.auto_capture || false;
+      learnUpdateCalibUI();
+      learnUpdateMatch(d.match_rate, d.anomaly_rate);
+      learnRenderProfile(d.normal_profile);
+    }).catch(function () {});
+  }
+
+  function learnRenderProfile(profile) {
+    $learnProfileBody.innerHTML = "";
+    if (!profile) return;
+    var feats = Object.keys(profile);
+    feats.forEach(function (f) {
+      var p = profile[f];
+      var range = p.max - p.min;
+      var tr = document.createElement("tr");
+      tr.style.borderBottom = "1px solid var(--border)";
+      var tdName = document.createElement("td");
+      tdName.style.cssText = "padding:6px 10px;color:var(--text-bright);";
+      tdName.textContent = f;
+      var tdMean = document.createElement("td");
+      tdMean.style.cssText = "padding:6px 10px;text-align:right;color:var(--text);";
+      tdMean.textContent = p.mean.toFixed(4);
+      var tdMin = document.createElement("td");
+      tdMin.style.cssText = "padding:6px 10px;text-align:right;color:var(--muted);";
+      tdMin.textContent = p.min.toFixed(4);
+      var tdMax = document.createElement("td");
+      tdMax.style.cssText = "padding:6px 10px;text-align:right;color:var(--muted);";
+      tdMax.textContent = p.max.toFixed(4);
+      var tdBar = document.createElement("td");
+      tdBar.style.cssText = "padding:6px 10px;";
+      var barBg = document.createElement("div");
+      barBg.style.cssText = "background:var(--border);height:6px;position:relative;";
+      var barFg = document.createElement("div");
+      barFg.style.cssText = "background:var(--accent);height:100%;width:100%;";
+      barBg.appendChild(barFg);
+      tdBar.appendChild(barBg);
+      tr.appendChild(tdName);
+      tr.appendChild(tdMean);
+      tr.appendChild(tdMin);
+      tr.appendChild(tdMax);
+      tr.appendChild(tdBar);
+      $learnProfileBody.appendChild(tr);
+    });
+  }
+
+  function learnUpdateCalib(count, target) {
+    learnCalibCount = count;
+    learnCalibTarget = target;
+    learnUpdateCalibUI();
+  }
+
+  function learnUpdateCalibUI() {
+    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget;
+    var pct = learnCalibTarget > 0 ? (learnCalibCount / learnCalibTarget) * 100 : 0;
+    $learnCalibBar.style.width = Math.min(pct, 100) + "%";
+    $learnCalibBar.style.background = learnCalibCount >= learnCalibTarget ? "var(--ok)" : "var(--accent)";
+    $learnRetrainBtn.disabled = learnCalibCount < learnCalibMin;
+    $learnAutoBtn.textContent = "Auto-capture: " + (learnAutoCapture ? "ON" : "OFF");
+    $learnAutoBtn.style.borderColor = learnAutoCapture ? "var(--ok)" : "var(--border)";
+    $learnAutoBtn.style.color = learnAutoCapture ? "var(--ok)" : "var(--text)";
+    $learnCalibAuto.textContent = "auto: " + (learnAutoCapture ? "on" : "off");
+    if (learnCalibCount >= learnCalibTarget) {
+      $learnCaptureBtn.disabled = true;
+      $learnCaptureBtn.style.opacity = "0.35";
+    }
+  }
+
+  function learnUpdateMatch(matchRate, anomalyRate) {
+    if (matchRate === null || matchRate === undefined) {
+      $learnMatchVal.textContent = "—";
+      $learnMatchBar.style.width = "0%";
+      $learnAnomalyRate.textContent = "—";
+      $learnAnomalyWindow.textContent = "0";
+      return;
+    }
+    var pct = Math.round(matchRate * 100);
+    $learnMatchVal.textContent = pct + "%";
+    $learnMatchBar.style.width = pct + "%";
+    if (pct >= 80) {
+      $learnMatchBar.style.background = "var(--ok)";
+      $learnMatchVal.style.color = "var(--ok)";
+    } else if (pct >= 50) {
+      $learnMatchBar.style.background = "var(--accent)";
+      $learnMatchVal.style.color = "var(--accent)";
+    } else {
+      $learnMatchBar.style.background = "var(--danger)";
+      $learnMatchVal.style.color = "var(--danger)";
+    }
+    $learnAnomalyRate.textContent = (anomalyRate * 100).toFixed(1) + "%";
+  }
+
+  $learnCaptureBtn.addEventListener("click", function () {
+    fetch("/calibrate/capture", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { $learnTrainResult.textContent = "Error: " + d.error; return; }
+        learnUpdateCalib(d.count, d.target);
+      })
+      .catch(function (e) { $learnTrainResult.textContent = "Fetch error: " + e; });
+  });
+
+  $learnAutoBtn.addEventListener("click", function () {
+    fetch("/calibrate/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enable: !learnAutoCapture }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        learnAutoCapture = d.auto_capture;
+        learnUpdateCalibUI();
+      })
+      .catch(function () {});
+  });
+
+  $learnRetrainBtn.addEventListener("click", function () {
+    $learnRetrainBtn.disabled = true;
+    $learnTrainResult.textContent = "Training...";
+    $learnTrainResult.style.color = "var(--muted)";
+    fetch("/calibrate/train", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) {
+          $learnTrainResult.textContent = "Error: " + d.error;
+          $learnTrainResult.style.color = "var(--danger)";
+          $learnRetrainBtn.disabled = false;
+          return;
+        }
+        $learnTrainResult.textContent = (d.fpr || "") + " — model reloaded";
+        $learnTrainResult.style.color = "var(--ok)";
+        learnFetchStatus();
+      })
+      .catch(function (e) {
+        $learnTrainResult.textContent = "Fetch error: " + e;
+        $learnTrainResult.style.color = "var(--danger)";
+        $learnRetrainBtn.disabled = false;
+      });
+  });
+
+  $learnResetBtn.addEventListener("click", function () {
+    fetch("/calibrate/reset", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        learnUpdateCalib(d.count || 0, d.target || 150);
+        $learnTrainResult.textContent = "";
+        $learnCaptureBtn.disabled = false;
+        $learnCaptureBtn.style.opacity = "";
+      })
+      .catch(function () {});
+  });
+
+  learnFetchStatus();
+
+  /* Periodically refresh model-status when Learning tab is visible */
+  setInterval(function () {
+    var learnTab = document.getElementById("tab-learning");
+    if (learnTab && learnTab.classList.contains("active")) {
+      learnFetchStatus();
+    }
+  }, 3000);
 
   /* ---- ROUTER FEED PANEL ---- */
   var $rfPanel   = document.getElementById("rfPanel");

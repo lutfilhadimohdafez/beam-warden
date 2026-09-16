@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -78,6 +79,16 @@ PLAYBACK: dict = {
     "total": 0,
     "attack_start": -1,
 }
+
+
+# ── calibration + anomaly history ─────────────────────────────────────────
+CALIB_BUFFER: list[list[float]] = []  # list of feature vectors
+_AUTO_CAPTURE: bool = False
+ANOMALY_HISTORY: deque[bool] = deque(maxlen=60)  # last 60 is_anomaly results
+_CALIB_CSV = Path(__file__).resolve().parent.parent / "data" / "normal_calib.csv"
+_CALIB_TARGET = 150
+_CALIB_MIN = 30
+_TRAIN_CMD = [sys.executable, str(Path(__file__).resolve().parent / "train_detector.py")]
 
 
 def score_sample(msg: dict) -> tuple[float | None, bool]:
@@ -149,6 +160,29 @@ def _build_message(
 async def _broadcast(msg: dict) -> None:
     global latest_sample
     latest_sample = msg
+    # Track anomaly history for rolling rate
+    if msg.get("anomaly_score") is not None:
+        ANOMALY_HISTORY.append(bool(msg.get("is_anomaly", False)))
+    # Auto-capture: append one sample per broadcast while active
+    if _AUTO_CAPTURE and msg.get("anomaly_score") is not None and len(CALIB_BUFFER) < _CALIB_TARGET:
+        feats = DETECTOR["features"] if DETECTOR else [
+            "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
+            "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
+            "tx_mcs", "tx_nss",
+        ]
+        vec = [float(msg.get(f, 0) or 0) for f in feats]
+        CALIB_BUFFER.append(vec)
+        _append_calib_csv(feats, vec)
+        calib_msg = {"type": "calib", "count": len(CALIB_BUFFER), "target": _CALIB_TARGET}
+        payload_calib = json.dumps(calib_msg)
+        dead_calib: list[WebSocket] = []
+        for ws in clients:
+            try:
+                await ws.send_text(payload_calib)
+            except Exception:
+                dead_calib.append(ws)
+        for ws in dead_calib:
+            clients.discard(ws)
     payload = json.dumps(msg)
     dead: list[WebSocket] = []
     for ws in clients:
@@ -579,6 +613,169 @@ async def _session_endpoint(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "source": source})
 
 
+# ── calibration helpers ───────────────────────────────────────────────────
+def _append_calib_csv(features: list[str], vec: list[float]) -> None:
+    """Append a single calibration sample to data/normal_calib.csv."""
+    write_header = not _CALIB_CSV.is_file()
+    with _CALIB_CSV.open("a", newline="") as f:
+        w = csv.writer(f)
+        if write_header:
+            w.writerow(features)
+        w.writerow([f"{v}" for v in vec])
+
+
+def _reload_detector() -> dict | None:
+    """Reload the DETECTOR global from disk. Returns new DETECTOR or None."""
+    global DETECTOR
+    try:
+        DETECTOR = joblib.load(_MODEL_PATH)
+    except Exception:
+        DETECTOR = None
+    return DETECTOR
+
+
+def _read_normal_profile() -> dict | None:
+    """Read per-feature mean/min/max from data/normal_iperf.csv."""
+    ref = Path(__file__).resolve().parent.parent / "data" / "normal_iperf.csv"
+    if not ref.is_file():
+        return None
+    features = [
+        "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
+        "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
+        "tx_mcs", "tx_nss",
+    ]
+    data: dict[str, list[float]] = {f: [] for f in features}
+    with ref.open(newline="") as f:
+        for row in csv.DictReader(f):
+            for feat in features:
+                try:
+                    data[feat].append(float(row.get(feat, 0) or 0))
+                except (ValueError, TypeError):
+                    pass
+    profile = {}
+    for feat in features:
+        vals = data[feat]
+        if vals:
+            profile[feat] = {
+                "mean": round(sum(vals) / len(vals), 4),
+                "min": round(min(vals), 4),
+                "max": round(max(vals), 4),
+            }
+        else:
+            profile[feat] = {"mean": 0, "min": 0, "max": 0}
+    return profile
+
+
+# ── model status endpoint ─────────────────────────────────────────────────
+async def _model_status(request: Request) -> JSONResponse:
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    features = DETECTOR["features"] if DETECTOR else []
+    n_samples = len(CALIB_BUFFER)
+    if DETECTOR is not None:
+        try:
+            ref = Path(__file__).resolve().parent.parent / "data" / "normal_iperf.csv"
+            with ref.open(newline="") as f:
+                n_samples = sum(1 for _ in csv.reader(f)) - 1  # minus header
+        except Exception:
+            pass
+    contamination = DETECTOR["model"].contamination if DETECTOR else None
+    profile = _read_normal_profile()
+    total = len(ANOMALY_HISTORY)
+    anomalies = sum(1 for v in ANOMALY_HISTORY if v)
+    anomaly_rate = anomalies / total if total > 0 else 0.0
+    return JSONResponse({
+        "model_loaded": DETECTOR is not None,
+        "features": features,
+        "n_samples": n_samples,
+        "contamination": contamination,
+        "normal_profile": profile,
+        "anomaly_rate": round(anomaly_rate, 4),
+        "match_rate": round(1.0 - anomaly_rate, 4),
+        "calib_count": len(CALIB_BUFFER),
+        "calib_target": _CALIB_TARGET,
+        "auto_capture": _AUTO_CAPTURE,
+    })
+
+
+# ── calibration endpoints ─────────────────────────────────────────────────
+async def _calibrate_capture(request: Request) -> JSONResponse:
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    if latest_sample is None:
+        return JSONResponse({"error": "no live sample yet"}, status_code=400)
+    if len(CALIB_BUFFER) >= _CALIB_TARGET:
+        return JSONResponse({"error": "buffer full", "count": len(CALIB_BUFFER), "target": _CALIB_TARGET}, status_code=400)
+    features = DETECTOR["features"] if DETECTOR else [
+        "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
+        "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
+        "tx_mcs", "tx_nss",
+    ]
+    vec = [float(latest_sample.get(f, 0) or 0) for f in features]
+    CALIB_BUFFER.append(vec)
+    _append_calib_csv(features, vec)
+    return JSONResponse({"count": len(CALIB_BUFFER), "target": _CALIB_TARGET})
+
+
+async def _calibrate_reset(request: Request) -> JSONResponse:
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    global _AUTO_CAPTURE
+    CALIB_BUFFER.clear()
+    _AUTO_CAPTURE = False
+    try:
+        _CALIB_CSV.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "count": 0, "target": _CALIB_TARGET})
+
+
+async def _calibrate_train(request: Request) -> JSONResponse:
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    if len(CALIB_BUFFER) < _CALIB_MIN:
+        return JSONResponse({"error": f"need >= {_CALIB_MIN} samples, have {len(CALIB_BUFFER)}"}, status_code=400)
+    if not _CALIB_CSV.is_file():
+        return JSONResponse({"error": "calibration CSV not found"}, status_code=500)
+    # Run train_detector on the calibration CSV
+    cmd = _TRAIN_CMD + ["--csv", str(_CALIB_CSV), "--out", str(_MODEL_PATH)]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            return JSONResponse({"error": f"train failed: {stderr.decode()[:500]}"}, status_code=500)
+    except Exception as exc:
+        return JSONResponse({"error": f"train exec error: {exc}"}, status_code=500)
+    # Reload model in-process
+    det = _reload_detector()
+    if det is None:
+        return JSONResponse({"error": "model reload failed after training"}, status_code=500)
+    # Compute training FPR from the output
+    fpr_str = ""
+    for line in stdout.decode().splitlines():
+        if "false-positive" in line.lower():
+            fpr_str = line.strip()
+            break
+    return JSONResponse({"ok": True, "fpr": fpr_str, "n_samples": len(CALIB_BUFFER)})
+
+
+async def _calibrate_auto(request: Request) -> JSONResponse:
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    global _AUTO_CAPTURE
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enable = body.get("enable", not _AUTO_CAPTURE)
+    _AUTO_CAPTURE = bool(enable)
+    return JSONResponse({"auto_capture": _AUTO_CAPTURE, "count": len(CALIB_BUFFER), "target": _CALIB_TARGET})
+
+
 # ── BFI live stream thread ────────────────────────────────────────────────
 def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
     """Background thread: run bfi_features.stream_features and update BFI_LATEST."""
@@ -693,6 +890,11 @@ app = Starlette(
         Route("/session", _session_endpoint, methods=["POST"]),
         Route("/run/{name}", _run_endpoint, methods=["POST"]),
         Route("/stop/{name}", _stop_endpoint, methods=["POST"]),
+        Route("/model-status", _model_status),
+        Route("/calibrate/capture", _calibrate_capture, methods=["POST"]),
+        Route("/calibrate/reset", _calibrate_reset, methods=["POST"]),
+        Route("/calibrate/train", _calibrate_train, methods=["POST"]),
+        Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
     ],
