@@ -13,10 +13,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
 import subprocess
 import sys
-from typing import Dict, List, Tuple
+import tempfile
+import threading
+import time
+from typing import Dict, Iterator, List, Tuple
 
 import numpy as np
 
@@ -196,6 +200,65 @@ FEATURE_COLUMNS = [
 ]
 
 
+def frame_to_features(
+    report: bytes,
+    nr: int,
+    nc: int,
+    codebook: int,
+    feedback_type: int,
+    window_state: Dict[str, List[float]],
+    frame_id: int = 0,
+    window: int = 10,
+) -> Dict[str, float] | None:
+    """Decode one beamforming report into a feature dict.
+
+    *window_state* is mutated in-place (phi/psi rolling history) so the caller
+    can maintain temporal-var state across calls.  Returns None if the report
+    is empty or decodes to Nst==0.
+    """
+    if not report:
+        return None
+
+    b_phi, b_psi = get_bitwidths(feedback_type, codebook)
+    angles, is_phi_mask, Nst = decode_angles(report, nr, nc, b_phi, b_psi)
+
+    if Nst == 0:
+        return None
+
+    NANG = compute_NANG(nr, nc)
+    phi_mask = np.array(is_phi_mask, dtype=bool)
+    psi_mask = ~phi_mask
+
+    phi_mean = float(np.mean(angles[phi_mask])) if np.any(phi_mask) else 0.0
+    psi_mean = float(np.mean(angles[psi_mask])) if np.any(psi_mask) else 0.0
+
+    ws_phi = window_state.setdefault("phi", [])
+    ws_psi = window_state.setdefault("psi", [])
+    ws_phi.append(phi_mean)
+    ws_psi.append(psi_mean)
+
+    if len(ws_phi) >= window:
+        phi_temp_var = float(np.var(ws_phi[-window:]))
+        psi_temp_var = float(np.var(ws_psi[-window:]))
+    else:
+        phi_temp_var = 0.0
+        psi_temp_var = 0.0
+
+    return {
+        "frame": frame_id,
+        "nr": nr,
+        "nc": nc,
+        "nst": Nst,
+        "nang": NANG,
+        "bfi_phi_mean": phi_mean,
+        "bfi_psi_mean": psi_mean,
+        "bfi_angle_var": float(np.var(angles)),
+        "bfi_subcarrier_var": float(np.mean(np.var(angles, axis=1))),
+        "bfi_phi_temporal_var": phi_temp_var,
+        "bfi_psi_temporal_var": psi_temp_var,
+    }
+
+
 def extract_features(
     pcap: str, window: int = 10,
 ) -> List[Dict[str, float]]:
@@ -207,8 +270,7 @@ def extract_features(
     fb_cache = _all_frame_bytes(pcap, frame_numbers=[r[0] for r in rows])
 
     features: List[Dict[str, float]] = []
-    phi_history: List[float] = []
-    psi_history: List[float] = []
+    window_state: Dict[str, List[float]] = {}
 
     for fn, mc_hex, rl in rows:
         info = _mimo_and_report(pcap, fn, mc_hex, rl, frame_bytes_cache=fb_cache)
@@ -217,49 +279,131 @@ def extract_features(
         report = info["report"]
         assert isinstance(report, bytes)
 
-        if not report:
-            continue
-
-        b_phi, b_psi = get_bitwidths(int(info["feedback_type"]), int(info["codebook"]))
-        angles, is_phi_mask, Nst = decode_angles(report, Nr, Nc, b_phi, b_psi)
-
-        if Nst == 0:
-            continue
-
-        NANG = compute_NANG(Nr, Nc)
-        phi_mask = np.array(is_phi_mask, dtype=bool)
-        psi_mask = ~phi_mask
-
-        phi_mean = float(np.mean(angles[phi_mask])) if np.any(phi_mask) else 0.0
-        psi_mean = float(np.mean(angles[psi_mask])) if np.any(psi_mask) else 0.0
-
-        phi_history.append(phi_mean)
-        psi_history.append(psi_mean)
-
-        # Rolling temporal variance (window of W frames)
-        if len(phi_history) >= window:
-            phi_temp_var = float(np.var(phi_history[-window:]))
-            psi_temp_var = float(np.var(psi_history[-window:]))
-        else:
-            phi_temp_var = 0.0
-            psi_temp_var = 0.0
-
-        row = {
-            "frame": int(fn),
-            "nr": Nr,
-            "nc": Nc,
-            "nst": Nst,
-            "nang": NANG,
-            "bfi_phi_mean": phi_mean,
-            "bfi_psi_mean": psi_mean,
-            "bfi_angle_var": float(np.var(angles)),
-            "bfi_subcarrier_var": float(np.mean(np.var(angles, axis=1))),
-            "bfi_phi_temporal_var": phi_temp_var,
-            "bfi_psi_temporal_var": psi_temp_var,
-        }
-        features.append(row)
+        feat = frame_to_features(
+            report, Nr, Nc,
+            int(info["codebook"]), int(info["feedback_type"]),
+            window_state, frame_id=int(fn), window=window,
+        )
+        if feat is not None:
+            features.append(feat)
 
     return features
+
+
+# ---------------------------------------------------------------------------
+# Live streaming
+# ---------------------------------------------------------------------------
+
+def _live_meta_rows(pcap_path: str, seen: set) -> List[Tuple[str, str, int]]:
+    """Return category-30 meta rows not yet in *seen*."""
+    rows = _meta_rows(pcap_path)
+    return [(fn, mc, rl) for fn, mc, rl in rows if fn not in seen]
+
+
+def _live_frame_bytes(pcap_path: str, frame_numbers: List[str]) -> Dict[str, bytes]:
+    """Read raw bytes for specific frames from a (possibly growing) pcap.
+
+    ponytail: tshark -x on a live-written pcap may race; retry on failure.
+    """
+    for _attempt in range(3):
+        try:
+            return _all_frame_bytes(pcap_path, frame_numbers=frame_numbers)
+        except Exception:
+            time.sleep(0.05)
+    return {}
+
+
+def stream_features(
+    iface: str,
+    duration: int = 0,
+    window: int = 10,
+) -> Iterator[Dict[str, float]]:
+    """Yield feature dicts from live BFI capture on *iface*.
+
+    Uses a background tshark capture writing to a temp pcap, polled
+    periodically for new category-30 frames.  Temporal-var window state
+    is maintained across yielded frames.
+
+    ponytail: capture-to-tmpfile-then-decode — true real-time raw-byte
+    extraction from a live tshark pipe is not viable (tshark -x blocks).
+    Latency ceiling: poll_interval (0.5s) + tshark write buffering.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    stop_event = threading.Event()
+    err_holder: list[str] = []
+
+    def _capture():
+        cmd = [
+            "tshark", "-i", iface,
+            "-Y", "wlan.fixed.category_code==30",
+            "-w", tmp_path,
+        ]
+        if duration > 0:
+            cmd += ["-a", f"duration:{duration}"]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=(duration + 60) if duration > 0 else None)
+            if proc.returncode != 0 and proc.stderr:
+                err_holder.append(proc.stderr)
+        except Exception as e:
+            err_holder.append(str(e))
+        finally:
+            stop_event.set()
+
+    cap_thread = threading.Thread(target=_capture, daemon=True)
+    cap_thread.start()
+
+    seen_frames: set = set()
+    window_state: Dict[str, List[float]] = {}
+    local_counter = 0
+    poll_interval = 0.5
+    deadline = time.time() + duration if duration > 0 else float("inf")
+
+    try:
+        while not stop_event.is_set() and time.time() < deadline:
+            time.sleep(poll_interval)
+
+            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 24:
+                continue
+
+            try:
+                new_rows = _live_meta_rows(tmp_path, seen_frames)
+            except Exception:
+                continue
+
+            if not new_rows:
+                continue
+
+            fns = [r[0] for r in new_rows]
+            fb_cache = _live_frame_bytes(tmp_path, fns)
+            if not fb_cache:
+                continue
+
+            for fn, mc_hex, rl in new_rows:
+                seen_frames.add(fn)
+                info = _mimo_and_report(
+                    tmp_path, fn, mc_hex, rl, frame_bytes_cache=fb_cache,
+                )
+                local_counter += 1
+                feat = frame_to_features(
+                    info["report"],
+                    int(info["nr"]), int(info["nc"]),
+                    int(info["codebook"]), int(info["feedback_type"]),
+                    window_state, frame_id=local_counter, window=window,
+                )
+                if feat is not None:
+                    yield feat
+
+    finally:
+        stop_event.set()
+        cap_thread.join(timeout=5)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -268,34 +412,50 @@ def extract_features(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pcap", required=True, help="Input pcap with HE BFI frames")
-    parser.add_argument("--out", required=True, help="Output CSV path")
-    parser.add_argument("--window", type=int, default=10, help="Rolling window size for temporal variance")
+    parser.add_argument("--pcap", help="Input pcap with HE BFI frames (offline mode)")
+    parser.add_argument("--out", help="Output CSV path (offline mode)")
+    parser.add_argument("--live", metavar="IFACE",
+                        help="Live capture mode: monitor-mode interface (e.g. mon0)")
+    parser.add_argument("--duration", type=int, default=0,
+                        help="Live capture duration in seconds (0=unlimited)")
+    parser.add_argument("--window", type=int, default=10,
+                        help="Rolling window size for temporal variance")
     args = parser.parse_args()
 
-    features = extract_features(args.pcap, window=args.window)
-    if not features:
-        print("No HE BFI frames found.", file=sys.stderr)
-        sys.exit(1)
+    if args.live:
+        import json as _json
+        count = 0
+        for feat in stream_features(args.live, duration=args.duration, window=args.window):
+            print(_json.dumps(feat), flush=True)
+            count += 1
+        if count == 0:
+            print("No HE BFI frames captured.", file=sys.stderr)
+            sys.exit(1)
 
-    # Write CSV
-    with open(args.out, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FEATURE_COLUMNS)
-        writer.writeheader()
-        writer.writerows(features)
+    elif args.pcap and args.out:
+        features = extract_features(args.pcap, window=args.window)
+        if not features:
+            print("No HE BFI frames found.", file=sys.stderr)
+            sys.exit(1)
 
-    # Summary
-    nr = features[0]["nr"]
-    nc = features[0]["nc"]
-    nst = features[0]["nst"]
-    nang = features[0]["nang"]
+        with open(args.out, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FEATURE_COLUMNS)
+            writer.writeheader()
+            writer.writerows(features)
 
-    mean_vals = {col: np.mean([r[col] for r in features]) for col in FEATURE_COLUMNS[5:]}
-    summary_parts = "  ".join(f"{k}={v:.4f}" for k, v in mean_vals.items())
-    print(
-        f"{len(features)} frames decoded  Nr={nr} Nc={nc} Nst={nst} NANG={nang}  "
-        f"{summary_parts}"
-    )
+        nr = features[0]["nr"]
+        nc = features[0]["nc"]
+        nst = features[0]["nst"]
+        nang = features[0]["nang"]
+        mean_vals = {col: np.mean([r[col] for r in features]) for col in FEATURE_COLUMNS[5:]}
+        summary_parts = "  ".join(f"{k}={v:.4f}" for k, v in mean_vals.items())
+        print(
+            f"{len(features)} frames decoded  Nr={nr} Nc={nc} Nst={nst} NANG={nang}  "
+            f"{summary_parts}"
+        )
+
+    else:
+        parser.error("Either --pcap + --out (offline) or --live <iface> (live) required")
 
 
 if __name__ == "__main__":

@@ -762,6 +762,35 @@
     </div>
   </div>
 
+  <!-- BFI / CSI PANEL -->
+  <div class="section-label">BFI / CSI STREAM</div>
+  <div class="tiles" id="bfiPanel">
+    <div class="tile">
+      <div class="tile-label">Phi Mean</div>
+      <div class="tile-value" id="valBfiPhi">-</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Psi Mean</div>
+      <div class="tile-value" id="valBfiPsi">-</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Angle Var</div>
+      <div class="tile-value" id="valBfiAngleVar">-</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">SC Var</div>
+      <div class="tile-value" id="valBfiScVar">-</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Phi Temporal</div>
+      <div class="tile-value" id="valBfiPhiTemp">-</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Psi Temporal</div>
+      <div class="tile-value" id="valBfiPsiTemp">-</div>
+    </div>
+  </div>
+
   <!-- CHARTS -->
   <div class="section-label">TIME SERIES</div>
   <div class="charts">
@@ -1078,6 +1107,22 @@
     $valTxPer.textContent  = d.tx_per_pct.toFixed(2);
     $valRssi.textContent   = d.rssi0;
     $valTemp.textContent   = d.temp_c;
+
+    /* BFI / CSI panel (only update if data present) */
+    if (d.bfi_phi_mean !== null && d.bfi_phi_mean !== undefined) {
+      var $bfiPhi    = document.getElementById("valBfiPhi");
+      var $bfiPsi    = document.getElementById("valBfiPsi");
+      var $bfiAngle  = document.getElementById("valBfiAngleVar");
+      var $bfiSc     = document.getElementById("valBfiScVar");
+      var $bfiPhiT   = document.getElementById("valBfiPhiTemp");
+      var $bfiPsiT   = document.getElementById("valBfiPsiTemp");
+      $bfiPhi.textContent   = d.bfi_phi_mean.toFixed(4);
+      $bfiPsi.textContent   = d.bfi_psi_mean.toFixed(4);
+      $bfiAngle.textContent = d.bfi_angle_var.toFixed(4);
+      $bfiSc.textContent    = d.bfi_subcarrier_var.toFixed(4);
+      $bfiPhiT.textContent  = d.bfi_phi_temporal_var.toFixed(4);
+      $bfiPsiT.textContent  = d.bfi_psi_temporal_var.toFixed(4);
+    }
 
     if (d.tx_mcs !== null && d.tx_mcs !== undefined) {
       $valMcs.textContent = d.tx_mcs;

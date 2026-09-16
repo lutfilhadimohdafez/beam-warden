@@ -12,6 +12,7 @@ import csv
 import json
 import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +37,22 @@ from tasks import TASK_REGISTRY, resolve_cmd
 args: argparse.Namespace  # set in __main__ before uvicorn.run
 clients: set[WebSocket] = set()
 latest_sample: dict | None = None
+
+# ── BFI live stream state (optional, set when --bfi-iface is given) ──────
+BFI_LATEST: dict = {}  # thread-safe-ish: written by bfi thread, read by producer
+_BFI_KEYS = [
+    "bfi_phi_mean", "bfi_psi_mean", "bfi_angle_var",
+    "bfi_subcarrier_var", "bfi_phi_temporal_var", "bfi_psi_temporal_var",
+]
+
+
+def _merge_bfi(msg: dict) -> dict:
+    """Fold latest BFI features into *msg* (no-op if BFI_LATEST is empty)."""
+    if BFI_LATEST:
+        for k in _BFI_KEYS:
+            if k in BFI_LATEST:
+                msg[k] = BFI_LATEST[k]
+    return msg
 
 # ── task runner state ─────────────────────────────────────────────────────
 # ponytail: localhost-only; this is a local research rig, not a public service.
@@ -116,6 +133,12 @@ def _build_message(
         "index": 0,
         "total": 0,
         "playing": True,
+        "bfi_phi_mean": None,
+        "bfi_psi_mean": None,
+        "bfi_angle_var": None,
+        "bfi_subcarrier_var": None,
+        "bfi_phi_temporal_var": None,
+        "bfi_psi_temporal_var": None,
     }
 
 
@@ -210,6 +233,7 @@ async def _producer_live() -> None:
                 tx_phymode=parsed["tx_phymode"],
                 temp_c=parsed["temp_c"],
             )
+            _merge_bfi(msg)
             score, is_anom = score_sample(msg)
             msg["anomaly_score"] = score
             msg["is_anomaly"] = is_anom
@@ -406,11 +430,39 @@ def cmd_pattern(name: str, entry: dict) -> str:
     return f"^{cmd[0]}"
 
 
+# ── BFI live stream thread ────────────────────────────────────────────────
+def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
+    """Background thread: run bfi_features.stream_features and update BFI_LATEST."""
+    try:
+        from bfi_features import stream_features
+    except ImportError:
+        print("[BFI] bfi_features import failed — BFI stream disabled", file=sys.stderr)
+        return
+    try:
+        for feat in stream_features(iface, duration=duration, window=window):
+            for k in _BFI_KEYS:
+                if k in feat:
+                    BFI_LATEST[k] = feat[k]
+    except Exception as exc:
+        print(f"[BFI] stream error: {exc}", file=sys.stderr)
+
+
 # ── lifespan: start/stop the producer (Starlette 1.x API) ─────────────────
 @asynccontextmanager
 async def _lifespan(app):
     producer = _producer_replay if args.mode == "replay" else _producer_live
     task = asyncio.create_task(producer())
+
+    # Optionally start BFI stream (PARALLEL to iwpriv poll)
+    bfi_thread = None
+    if getattr(args, "bfi_iface", None):
+        bfi_thread = threading.Thread(
+            target=_bfi_stream_thread,
+            args=(args.bfi_iface, 0, 10),
+            daemon=True,
+        )
+        bfi_thread.start()
+
     try:
         yield
     finally:
@@ -509,6 +561,8 @@ if __name__ == "__main__":
     p.add_argument("--csv", default="data/normal_iperf.csv")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--bind", default="127.0.0.1")
+    p.add_argument("--bfi-iface", default=None,
+                    help="Monitor iface for live BFI stream (optional, parallel to telemetry)")
     args = p.parse_args()
 
     uvicorn.run(app, host=args.bind, port=args.port, log_level="info")
