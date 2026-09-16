@@ -31,9 +31,6 @@
     --shadow-accent: 0 0 20px rgba(232,122,30,0.08);
     --font-display: 'Oswald', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 10px;
   }
 
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -49,6 +46,7 @@
     position: relative;
   }
 
+  /* Grain overlay */
   body::before {
     content: '';
     position: fixed;
@@ -61,12 +59,31 @@
     background-size: 200px;
   }
 
+  /* Wave background */
+  .wave-bg {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+    opacity: 0.06;
+  }
+  .wave-bg svg { position: absolute; bottom: 0; left: 0; width: 200%; height: 100%; }
+  .wave-bg .wave-1 { animation: waveDrift 18s linear infinite; }
+  .wave-bg .wave-2 { animation: waveDrift 25s linear infinite reverse; opacity: 0.7; }
+  .wave-bg .wave-3 { animation: waveDrift 32s linear infinite; opacity: 0.4; }
+  @keyframes waveDrift {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
   .container {
     max-width: 1440px;
     margin: 0 auto;
     padding: 0 32px 120px;
+    position: relative;
+    z-index: 1;
   }
-
   @media (max-width: 640px) {
     .container { padding: 0 16px 80px; }
   }
@@ -94,13 +111,9 @@
   }
 
   /* ---- FOCUS RINGS ---- */
-  :focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button:focus-visible, input:focus-visible, a:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline: 2px solid var(--accent); outline-offset: 2px;
   }
 
   /* ---- HEADER ---- */
@@ -110,7 +123,7 @@
     justify-content: space-between;
     padding: 20px 0 16px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 24px;
+    margin-bottom: 16px;
   }
   .header-left { display: flex; flex-direction: column; gap: 3px; }
   .wordmark {
@@ -151,7 +164,7 @@
   .status-dot {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: 0;
     background: var(--danger);
     flex-shrink: 0;
     transition: background 0.3s;
@@ -171,11 +184,40 @@
   }
   .nav-link:hover { color: var(--accent); transform: translateX(2px); }
 
+  /* ---- TAB BAR ---- */
+  .tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    font-family: var(--font-display);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: color 0.25s, border-color 0.25s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--text-bright); }
+
+  /* ---- TAB SECTIONS ---- */
+  .tab-section { display: none; }
+  .tab-section.active { display: block; }
+
   /* ---- MODE BADGE ---- */
   .mode-badge {
     display: inline-block;
     padding: 3px 14px;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     font-family: var(--font-display);
     font-size: 0.68rem;
     font-weight: 700;
@@ -185,10 +227,8 @@
     color: #0a0a0a;
     transition: background 0.3s, color 0.3s;
   }
-  .mode-badge.replay {
-    background: var(--accent);
-    color: #0a0a0a;
-  }
+  .mode-badge.replay { background: var(--accent); color: #0a0a0a; }
+  .mode-badge.idle { background: var(--muted-dim); color: #0a0a0a; }
 
   /* ---- ERROR BAR ---- */
   .error-bar {
@@ -197,7 +237,7 @@
     border: 1px solid rgba(240,72,72,0.25);
     color: var(--danger);
     padding: 10px 16px;
-    border-radius: var(--radius-md);
+    border-radius: 0;
     margin-bottom: 16px;
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -205,29 +245,121 @@
   }
   .error-bar.visible { display: block; }
 
+  /* ---- SESSION BAR ---- */
+  .session-bar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-warm);
+  }
+  .session-bar-title {
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-dim);
+    margin-bottom: 12px;
+    font-variant-caps: all-small-caps;
+  }
+  .session-modes {
+    display: flex;
+    gap: 0;
+    margin-bottom: 14px;
+  }
+  .session-mode-btn {
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.25s, color 0.25s, border-color 0.25s;
+  }
+  .session-mode-btn:first-child { border-right: none; }
+  .session-mode-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--border-light);
+  }
+  .session-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .session-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .session-field label {
+    font-family: var(--font-display);
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-dim);
+    font-variant-caps: all-small-caps;
+  }
+  .session-field select,
+  .session-field input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 6px 10px;
+    outline: none;
+    transition: border-color 0.25s;
+    font-variant-numeric: tabular-nums;
+  }
+  .session-field select { min-width: 180px; cursor: pointer; }
+  .session-field input:focus,
+  .session-field select:focus { border-color: var(--border-light); }
+  .session-start-btn {
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 18px;
+    border: 1px solid var(--ok);
+    background: var(--ok-dim);
+    color: var(--ok);
+    cursor: pointer;
+    transition: background 0.25s, color 0.25s, transform 0.15s;
+  }
+  .session-start-btn:hover { background: var(--ok); color: #0a0a0a; }
+  .session-start-btn:active { transform: scale(0.97); }
+  .session-status {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted-dim);
+    margin-left: 12px;
+    align-self: center;
+  }
+
   /* ---- DETECTION HERO ---- */
   .detect-panel {
     background: linear-gradient(135deg, var(--panel) 0%, var(--panel-2) 100%);
     border: 1px solid var(--border);
-    border-top: 3px solid var(--accent);
-    border-radius: var(--radius-lg);
     padding: 28px 32px;
     margin-bottom: 24px;
     display: flex;
     align-items: center;
     gap: 40px;
     flex-wrap: wrap;
-    box-shadow: var(--shadow-warm-lg), var(--shadow-accent);
+    box-shadow: var(--shadow-warm-lg);
     position: relative;
     overflow: hidden;
-  }
-  .detect-panel::before {
-    content: '';
-    position: absolute;
-    top: 0; right: 0;
-    width: 200px; height: 200px;
-    background: radial-gradient(circle, rgba(232,122,30,0.04) 0%, transparent 70%);
-    pointer-events: none;
   }
   .detect-status {
     font-family: var(--font-display);
@@ -292,7 +424,6 @@
     width: 5px;
     height: 5px;
     background: var(--accent);
-    border-radius: 1px;
   }
 
   /* ---- STAT TILES — ASYMMETRIC GRID ---- */
@@ -308,7 +439,6 @@
   .tiles > .tile:nth-child(4) { grid-column: span 4; }
   .tiles > .tile:nth-child(5) { grid-column: span 5; }
   .tiles > .tile:nth-child(6) { grid-column: span 3; }
-
   @media (max-width: 900px) {
     .tiles { grid-template-columns: repeat(6, 1fr); }
     .tiles > .tile:nth-child(1) { grid-column: span 3; }
@@ -322,11 +452,10 @@
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .tiles > .tile { grid-column: span 1 !important; }
   }
-
   .tile {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 0;
     padding: 16px 14px 14px;
     text-align: center;
     box-shadow: var(--shadow-warm);
@@ -356,11 +485,7 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
   }
-  .tile-unit {
-    font-size: 0.72rem;
-    color: var(--muted);
-    font-weight: 400;
-  }
+  .tile-unit { font-size: 0.72rem; color: var(--muted); font-weight: 400; }
   .tile-sub {
     font-family: var(--font-mono);
     font-size: 0.58rem;
@@ -382,16 +507,14 @@
   .charts > .chart-card:nth-child(3) { grid-column: span 4; }
   .charts > .chart-card:nth-child(4) { grid-column: span 8; }
   .charts > .chart-card:nth-child(5) { grid-column: span 12; }
-
   @media (max-width: 900px) {
     .charts { grid-template-columns: 1fr; }
     .charts > .chart-card { grid-column: span 1 !important; }
   }
-
   .chart-card {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 0;
     padding: 16px;
     box-shadow: var(--shadow-warm);
     transition: transform 0.25s cubic-bezier(0.23,1,0.32,1), border-color 0.25s;
@@ -421,12 +544,8 @@
     width: 5px;
     height: 5px;
     background: var(--accent);
-    border-radius: 1px;
   }
-  .chart-wrap {
-    position: relative;
-    height: 210px;
-  }
+  .chart-wrap { position: relative; height: 210px; }
 
   /* ---- PLAYBACK BAR ---- */
   .playback-bar {
@@ -447,7 +566,7 @@
   .pb-btn {
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     color: var(--text);
     font-family: var(--font-mono);
     font-size: 0.82rem;
@@ -458,9 +577,9 @@
     min-width: 32px;
     text-align: center;
   }
-  .pb-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .pb-btn:hover { border-color: var(--border-light); color: var(--accent); background: var(--accent-dim); }
   .pb-btn:active { transform: scale(0.96); }
-  .pb-btn.active { border-color: var(--accent); color: var(--accent); }
+  .pb-btn.active { border-color: var(--border-light); color: var(--accent); }
   .pb-scrubber-wrap {
     flex: 1;
     position: relative;
@@ -474,7 +593,7 @@
     width: 100%;
     height: 4px;
     background: var(--border);
-    border-radius: 2px;
+    border-radius: 0;
     outline: none;
     cursor: pointer;
   }
@@ -483,7 +602,7 @@
     appearance: none;
     width: 14px;
     height: 14px;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     background: var(--accent);
     cursor: pointer;
     border: none;
@@ -492,7 +611,7 @@
   .pb-scrubber::-moz-range-thumb {
     width: 14px;
     height: 14px;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     background: var(--accent);
     cursor: pointer;
     border: none;
@@ -504,7 +623,6 @@
     width: 3px;
     height: 18px;
     background: var(--accent);
-    border-radius: 1px;
     pointer-events: none;
     z-index: 2;
     box-shadow: 0 0 6px rgba(232,122,30,0.4);
@@ -541,8 +659,8 @@
   }
   .pb-jump-btn {
     background: none;
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
+    border-radius: 0;
     color: var(--accent);
     font-family: var(--font-display);
     font-size: 0.6rem;
@@ -554,21 +672,16 @@
     transition: background 0.25s, color 0.25s, transform 0.15s;
     white-space: nowrap;
   }
-  .pb-jump-btn:hover {
-    background: var(--accent);
-    color: #0a0a0a;
-  }
+  .pb-jump-btn:hover { background: var(--accent); color: #0a0a0a; }
   .pb-jump-btn:active { transform: scale(0.96); }
 
   /* ---- MISSION CONTROL ---- */
   .mc-section {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-top: 3px solid var(--accent);
-    border-radius: var(--radius-lg);
     padding: 24px 28px;
     margin-bottom: 24px;
-    box-shadow: var(--shadow-warm), var(--shadow-accent);
+    box-shadow: var(--shadow-warm);
   }
   .mc-title {
     font-family: var(--font-display);
@@ -588,11 +701,7 @@
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border);
   }
-  .mc-param {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
+  .mc-param { display: flex; flex-direction: column; gap: 4px; }
   .mc-param label {
     font-family: var(--font-display);
     font-size: 0.56rem;
@@ -605,7 +714,7 @@
   .mc-param input {
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     color: var(--text);
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -616,10 +725,7 @@
     transition: border-color 0.25s, box-shadow 0.25s;
     font-variant-numeric: tabular-nums;
   }
-  .mc-param input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-dim);
-  }
+  .mc-param input:focus { border-color: var(--border-light); box-shadow: 0 0 0 2px rgba(255,255,255,0.06); }
 
   .mc-grid {
     display: grid;
@@ -629,7 +735,7 @@
   .mc-task {
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 0;
     padding: 14px 16px;
     display: flex;
     flex-direction: column;
@@ -638,7 +744,7 @@
     box-shadow: var(--shadow-warm);
   }
   .mc-task:hover {
-    border-color: var(--accent);
+    border-color: var(--border-light);
     transform: translateY(-2px);
     box-shadow: var(--shadow-warm-lg);
   }
@@ -663,12 +769,12 @@
     font-weight: 600;
     letter-spacing: 0.04em;
     padding: 2px 8px;
-    border-radius: 2px;
+    border-radius: 0;
     text-transform: uppercase;
     font-variant-caps: all-small-caps;
   }
   .mc-chip.idle { background: var(--panel-3); color: var(--muted-dim); border: 1px solid var(--border); }
-  .mc-chip.running { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(232,122,30,0.3); animation: pulse-text 1.2s ease-in-out infinite; }
+  .mc-chip.running { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--border-light); animation: pulse-text 1.2s ease-in-out infinite; }
   .mc-chip.done { background: var(--ok-dim); color: var(--ok); border: 1px solid rgba(61,214,128,0.25); }
   .mc-chip.failed { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(240,72,72,0.25); }
   .mc-task-desc {
@@ -678,10 +784,7 @@
     color: var(--muted);
     line-height: 1.5;
   }
-  .mc-task-actions {
-    display: flex;
-    gap: 6px;
-  }
+  .mc-task-actions { display: flex; gap: 6px; }
   .mc-btn {
     font-family: var(--font-display);
     font-size: 0.64rem;
@@ -689,14 +792,14 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     padding: 6px 14px;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     border: 1px solid var(--border);
     background: var(--panel);
     color: var(--text);
     cursor: pointer;
     transition: border-color 0.25s, color 0.25s, background 0.25s, transform 0.15s, box-shadow 0.25s;
   }
-  .mc-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .mc-btn:hover { border-color: var(--border-light); color: var(--accent); background: var(--accent-dim); }
   .mc-btn:active { transform: scale(0.97); }
   .mc-btn.run { border-color: var(--ok); color: var(--ok); }
   .mc-btn.run:hover { background: var(--ok-dim); }
@@ -708,7 +811,7 @@
   .console-section {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: 0;
     margin-bottom: 24px;
     display: flex;
     flex-direction: column;
@@ -739,12 +842,12 @@
     color: var(--muted);
     background: none;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     padding: 3px 10px;
     cursor: pointer;
     transition: border-color 0.25s, color 0.25s, transform 0.15s;
   }
-  .console-clear:hover { border-color: var(--accent); color: var(--accent); }
+  .console-clear:hover { border-color: var(--border-light); color: var(--accent); }
   .console-clear:active { transform: scale(0.95); }
   .console-body {
     height: 240px;
@@ -784,11 +887,21 @@
   /* ---- SCROLLBAR ---- */
   .console-body::-webkit-scrollbar { width: 5px; }
   .console-body::-webkit-scrollbar-track { background: transparent; }
-  .console-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .console-body::-webkit-scrollbar-thumb { background: var(--border); }
   .console-body::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 </style>
 </head>
 <body>
+
+<!-- WAVE BACKGROUND -->
+<div class="wave-bg">
+  <svg viewBox="0 0 2400 320" preserveAspectRatio="none">
+    <path class="wave-1" fill="#e87a1e" d="M0,160 C200,100 400,220 600,160 C800,100 1000,220 1200,160 C1400,100 1600,220 1800,160 C2000,100 2200,220 2400,160 L2400,320 L0,320 Z"/>
+    <path class="wave-2" fill="#3dd680" d="M0,200 C150,160 350,240 600,200 C850,160 1050,240 1200,200 C1350,160 1550,240 1800,200 C2050,160 2250,240 2400,200 L2400,320 L0,320 Z"/>
+    <path class="wave-3" fill="#4ea8f6" d="M0,240 C300,200 500,280 800,240 C1100,200 1300,280 1600,240 C1900,200 2100,280 2400,240 L2400,320 L0,320 Z"/>
+  </svg>
+</div>
+
 <div class="container">
 
   <!-- HEADER -->
@@ -807,165 +920,217 @@
     </div>
   </div>
 
-  <!-- ERROR BAR -->
-  <div class="error-bar" id="errorBar"></div>
-
-  <!-- DETECTION HERO -->
-  <div class="detect-panel stagger">
-    <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
-    <div class="detect-score-wrap">
-      <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
-      <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
-    </div>
+  <!-- TAB BAR -->
+  <div class="tab-bar stagger">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="command-center">Command Center</button>
   </div>
 
-  <!-- TELEMETRY TILES -->
-  <div class="section-label stagger">TELEMETRY</div>
-  <div class="tiles stagger">
-    <div class="tile">
-      <div class="tile-label">TX Throughput</div>
-      <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Retry Rate</div>
-      <div class="tile-value" id="valRetry">-</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">TX PER</div>
-      <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">RSSI 0</div>
-      <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">TX MCS</div>
-      <div class="tile-value" id="valMcs">-</div>
-      <div class="tile-sub" id="valMcsSub"></div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Temp</div>
-      <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
-    </div>
-  </div>
+  <!-- ======== DASHBOARD TAB ======== -->
+  <div class="tab-section active" id="tab-dashboard">
 
-  <!-- BFI / CSI PANEL -->
-  <div class="section-label stagger">BFI / CSI STREAM</div>
-  <div class="tiles stagger" id="bfiPanel">
-    <div class="tile">
-      <div class="tile-label">Phi Mean</div>
-      <div class="tile-value" id="valBfiPhi">-</div>
+    <!-- SESSION BAR -->
+    <div class="session-bar stagger">
+      <div class="session-bar-title">Session Source</div>
+      <div class="session-modes">
+        <button class="session-mode-btn active" data-session="replay">Replay</button>
+        <button class="session-mode-btn" data-session="live">Live</button>
+      </div>
+      <div class="session-fields" id="sessionReplayFields">
+        <div class="session-field">
+          <label>File</label>
+          <select id="sessionFileSelect"><option value="">Loading files...</option></select>
+        </div>
+        <button class="session-start-btn" id="sessionReplayStart">Start Replay</button>
+      </div>
+      <div class="session-fields" id="sessionLiveFields" style="display:none;">
+        <div class="session-field">
+          <label>Host</label>
+          <input id="sessionHost" value="192.168.0.1" placeholder="192.168.0.1">
+        </div>
+        <div class="session-field">
+          <label>User</label>
+          <input id="sessionUser" value="tmadmin" placeholder="tmadmin">
+        </div>
+        <div class="session-field">
+          <label>Password</label>
+          <input id="sessionPassword" type="password" value="REDACTED" placeholder="password">
+        </div>
+        <div class="session-field">
+          <label>Iface</label>
+          <input id="sessionIface" value="rai1" placeholder="rai1">
+        </div>
+        <button class="session-start-btn" id="sessionLiveConnect">Connect</button>
+      </div>
+      <div class="session-status" id="sessionStatus">no session &mdash; pick a source</div>
     </div>
-    <div class="tile">
-      <div class="tile-label">Psi Mean</div>
-      <div class="tile-value" id="valBfiPsi">-</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Angle Var</div>
-      <div class="tile-value" id="valBfiAngleVar">-</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">SC Var</div>
-      <div class="tile-value" id="valBfiScVar">-</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Phi Temporal</div>
-      <div class="tile-value" id="valBfiPhiTemp">-</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Psi Temporal</div>
-      <div class="tile-value" id="valBfiPsiTemp">-</div>
-    </div>
-  </div>
 
-  <!-- CHARTS -->
-  <div class="section-label stagger">TIME SERIES</div>
-  <div class="charts stagger">
-    <div class="chart-card">
-      <div class="chart-title">TX Throughput (Mbps)</div>
-      <div class="chart-wrap"><canvas id="chartTxTput"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Retry Rate</div>
-      <div class="chart-wrap"><canvas id="chartRetry"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Packet Error Rate (%)</div>
-      <div class="chart-wrap"><canvas id="chartPer"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">RSSI Chains 0-3 (dBm)</div>
-      <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Anomaly Score</div>
-      <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
-    </div>
-  </div>
+    <!-- ERROR BAR -->
+    <div class="error-bar" id="errorBar"></div>
 
-  <!-- MISSION CONTROL -->
-  <div class="section-label stagger">MISSION CONTROL</div>
-  <div class="mc-section stagger">
-    <div class="mc-params">
-      <div class="mc-param">
-        <label>Monitor Iface</label>
-        <input id="mcMon" value="mon0" placeholder="mon0">
-      </div>
-      <div class="mc-param">
-        <label>Channel</label>
-        <input id="mcChannel" value="48" placeholder="48">
-      </div>
-      <div class="mc-param">
-        <label>AP BSSID</label>
-        <input id="mcAp" value="fe:7a:58:92:b6:31" placeholder="fe:7a:58:92:b6:31">
-      </div>
-      <div class="mc-param">
-        <label>Victim MAC</label>
-        <input id="mcVictim" value="d2:93:e5:7c:20:71" placeholder="d2:93:e5:7c:20:71">
-      </div>
-      <div class="mc-param">
-        <label>Alpha</label>
-        <input id="mcAlpha" value="1.0" placeholder="1.0">
-      </div>
-      <div class="mc-param">
-        <label>Offset</label>
-        <input id="mcOffset" value="33" placeholder="33">
-      </div>
-      <div class="mc-param">
-        <label>Type</label>
-        <input id="mcType" value="0xe0" placeholder="0xe0">
-      </div>
-      <div class="mc-param">
-        <label>CSV Path</label>
-        <input id="mcCsv" value="data/normal_iperf.csv" placeholder="data/normal_iperf.csv">
-      </div>
-      <div class="mc-param">
-        <label>PCAP Path</label>
-        <input id="mcPcap" value="" placeholder="path/to/file.pcap">
-      </div>
-      <div class="mc-param">
-        <label>Output Path</label>
-        <input id="mcOut" value="" placeholder="path/to/out.csv">
-      </div>
-      <div class="mc-param">
-        <label>Run Name</label>
-        <input id="mcRun" value="" placeholder="run_001">
+    <!-- DETECTION HERO -->
+    <div class="detect-panel stagger">
+      <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
+      <div class="detect-score-wrap">
+        <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
+        <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
       </div>
     </div>
-    <div class="mc-grid" id="mcGrid">
-      <div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">Loading tasks&hellip;</div>
-    </div>
-  </div>
 
-  <!-- CONSOLE -->
-  <div class="section-label stagger">CONSOLE</div>
-  <div class="console-section stagger">
-    <div class="console-header">
-      <div class="console-title">Live Output</div>
-      <button class="console-clear" id="consoleClear">Clear</button>
+    <!-- TELEMETRY TILES -->
+    <div class="section-label stagger">TELEMETRY</div>
+    <div class="tiles stagger">
+      <div class="tile">
+        <div class="tile-label">TX Throughput</div>
+        <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Retry Rate</div>
+        <div class="tile-value" id="valRetry">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">TX PER</div>
+        <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">RSSI 0</div>
+        <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">TX MCS</div>
+        <div class="tile-value" id="valMcs">-</div>
+        <div class="tile-sub" id="valMcsSub"></div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Temp</div>
+        <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
+      </div>
     </div>
-    <div class="console-body" id="consoleBody"></div>
-  </div>
+
+    <!-- BFI / CSI PANEL -->
+    <div class="section-label stagger">BFI / CSI STREAM</div>
+    <div class="tiles stagger" id="bfiPanel">
+      <div class="tile">
+        <div class="tile-label">Phi Mean</div>
+        <div class="tile-value" id="valBfiPhi">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Psi Mean</div>
+        <div class="tile-value" id="valBfiPsi">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Angle Var</div>
+        <div class="tile-value" id="valBfiAngleVar">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">SC Var</div>
+        <div class="tile-value" id="valBfiScVar">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Phi Temporal</div>
+        <div class="tile-value" id="valBfiPhiTemp">-</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Psi Temporal</div>
+        <div class="tile-value" id="valBfiPsiTemp">-</div>
+      </div>
+    </div>
+
+    <!-- CHARTS -->
+    <div class="section-label stagger">TIME SERIES</div>
+    <div class="charts stagger">
+      <div class="chart-card">
+        <div class="chart-title">TX Throughput (Mbps)</div>
+        <div class="chart-wrap"><canvas id="chartTxTput"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Retry Rate</div>
+        <div class="chart-wrap"><canvas id="chartRetry"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Packet Error Rate (%)</div>
+        <div class="chart-wrap"><canvas id="chartPer"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">RSSI Chains 0-3 (dBm)</div>
+        <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Anomaly Score</div>
+        <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
+      </div>
+    </div>
+
+  </div><!-- /tab-dashboard -->
+
+  <!-- ======== COMMAND CENTER TAB ======== -->
+  <div class="tab-section" id="tab-command-center">
+
+    <!-- MISSION CONTROL -->
+    <div class="section-label stagger">MISSION CONTROL</div>
+    <div class="mc-section stagger">
+      <div class="mc-params">
+        <div class="mc-param">
+          <label>Monitor Iface</label>
+          <input id="mcMon" value="mon0" placeholder="mon0">
+        </div>
+        <div class="mc-param">
+          <label>Channel</label>
+          <input id="mcChannel" value="48" placeholder="48">
+        </div>
+        <div class="mc-param">
+          <label>AP BSSID</label>
+          <input id="mcAp" value="fe:7a:58:92:b6:31" placeholder="fe:7a:58:92:b6:31">
+        </div>
+        <div class="mc-param">
+          <label>Victim MAC</label>
+          <input id="mcVictim" value="d2:93:e5:7c:20:71" placeholder="d2:93:e5:7c:20:71">
+        </div>
+        <div class="mc-param">
+          <label>Alpha</label>
+          <input id="mcAlpha" value="1.0" placeholder="1.0">
+        </div>
+        <div class="mc-param">
+          <label>Offset</label>
+          <input id="mcOffset" value="33" placeholder="33">
+        </div>
+        <div class="mc-param">
+          <label>Type</label>
+          <input id="mcType" value="0xe0" placeholder="0xe0">
+        </div>
+        <div class="mc-param">
+          <label>CSV Path</label>
+          <input id="mcCsv" value="data/normal_iperf.csv" placeholder="data/normal_iperf.csv">
+        </div>
+        <div class="mc-param">
+          <label>PCAP Path</label>
+          <input id="mcPcap" value="" placeholder="path/to/file.pcap">
+        </div>
+        <div class="mc-param">
+          <label>Output Path</label>
+          <input id="mcOut" value="" placeholder="path/to/out.csv">
+        </div>
+        <div class="mc-param">
+          <label>Run Name</label>
+          <input id="mcRun" value="" placeholder="run_001">
+        </div>
+      </div>
+      <div class="mc-grid" id="mcGrid">
+        <div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">Loading tasks&hellip;</div>
+      </div>
+    </div>
+
+    <!-- CONSOLE -->
+    <div class="section-label stagger">CONSOLE</div>
+    <div class="console-section stagger">
+      <div class="console-header">
+        <div class="console-title">Live Output</div>
+        <button class="console-clear" id="consoleClear">Clear</button>
+      </div>
+      <div class="console-body" id="consoleBody"></div>
+    </div>
+
+  </div><!-- /tab-command-center -->
 
 </div>
 
@@ -1029,6 +1194,104 @@
   var $attackMarker   = document.getElementById("attackMarker");
   var $pbJumpAttack   = document.getElementById("pbJumpAttack");
 
+  /* ---- Tab switching ---- */
+  var tabBtns = document.querySelectorAll(".tab-btn");
+  var tabSections = document.querySelectorAll(".tab-section");
+
+  function switchTab(tabName) {
+    tabBtns.forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === tabName);
+    });
+    tabSections.forEach(function (sec) {
+      sec.classList.toggle("active", sec.id === "tab-" + tabName);
+    });
+    try { localStorage.setItem("bw-active-tab", tabName); } catch (e) {}
+  }
+
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      switchTab(btn.getAttribute("data-tab"));
+    });
+  });
+
+  /* Restore active tab */
+  try {
+    var savedTab = localStorage.getItem("bw-active-tab");
+    if (savedTab) switchTab(savedTab);
+  } catch (e) {}
+
+  /* ---- Session bar ---- */
+  var sessionModeBtns = document.querySelectorAll(".session-mode-btn");
+  var $sessionReplayFields = document.getElementById("sessionReplayFields");
+  var $sessionLiveFields = document.getElementById("sessionLiveFields");
+  var $sessionFileSelect = document.getElementById("sessionFileSelect");
+  var $sessionReplayStart = document.getElementById("sessionReplayStart");
+  var $sessionLiveConnect = document.getElementById("sessionLiveConnect");
+  var $sessionStatus = document.getElementById("sessionStatus");
+  var activeSessionMode = "replay";
+
+  sessionModeBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      activeSessionMode = btn.getAttribute("data-session");
+      sessionModeBtns.forEach(function (b) {
+        b.classList.toggle("active", b.getAttribute("data-session") === activeSessionMode);
+      });
+      $sessionReplayFields.style.display = activeSessionMode === "replay" ? "flex" : "none";
+      $sessionLiveFields.style.display = activeSessionMode === "live" ? "flex" : "none";
+    });
+  });
+
+  /* Populate replay file dropdown */
+  fetch("/replay-files").then(function (r) { return r.json(); }).then(function (files) {
+    $sessionFileSelect.innerHTML = "";
+    if (files.length === 0) {
+      $sessionFileSelect.innerHTML = '<option value="">No files in data/</option>';
+      return;
+    }
+    files.forEach(function (f) {
+      var opt = document.createElement("option");
+      opt.value = f;
+      opt.textContent = f;
+      $sessionFileSelect.appendChild(opt);
+    });
+  }).catch(function () {
+    $sessionFileSelect.innerHTML = '<option value="">Failed to load</option>';
+  });
+
+  function postSession(body) {
+    $sessionStatus.textContent = "Starting...";
+    fetch("/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error) {
+        $sessionStatus.textContent = "Error: " + d.error;
+      } else {
+        $sessionStatus.textContent = "Session started: " + d.source;
+      }
+    }).catch(function (e) {
+      $sessionStatus.textContent = "Fetch error: " + e;
+    });
+  }
+
+  $sessionReplayStart.addEventListener("click", function () {
+    var file = $sessionFileSelect.value;
+    if (!file) { $sessionStatus.textContent = "Select a file first"; return; }
+    var isPcap = file.endsWith(".pcap");
+    postSession({ source: isPcap ? "pcap" : "replay", file: file });
+  });
+
+  $sessionLiveConnect.addEventListener("click", function () {
+    postSession({
+      source: "live",
+      host: document.getElementById("sessionHost").value.trim(),
+      user: document.getElementById("sessionUser").value.trim(),
+      password: document.getElementById("sessionPassword").value,
+      iface: document.getElementById("sessionIface").value.trim(),
+    });
+  });
+
   /* ---- Status helpers ---- */
   function setStatus(state, text) {
     $statusDot.className = "status-dot" + (state === "ok" ? " ok" : state === "warn" ? " warn" : "");
@@ -1039,10 +1302,13 @@
     mode = m;
     if (m === "replay") {
       $modeBadge.textContent = "\u23F5 REPLAY \u00B7 DEMO DATA";
-      $modeBadge.classList.add("replay");
+      $modeBadge.className = "mode-badge replay";
+    } else if (m === "idle") {
+      $modeBadge.textContent = "IDLE";
+      $modeBadge.className = "mode-badge idle";
     } else {
       $modeBadge.textContent = "\u25CF LIVE";
-      $modeBadge.classList.remove("replay");
+      $modeBadge.className = "mode-badge";
     }
   }
 
@@ -1248,6 +1514,10 @@
     }
     if (d.type === "meta") {
       applyMeta(d);
+      return;
+    }
+    if (d.type === "session") {
+      $sessionStatus.textContent = d.detail || d.source;
       return;
     }
 

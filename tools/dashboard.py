@@ -38,6 +38,9 @@ args: argparse.Namespace  # set in __main__ before uvicorn.run
 clients: set[WebSocket] = set()
 latest_sample: dict | None = None
 
+# ── runtime session state ─────────────────────────────────────────────────
+_current_task: asyncio.Task | None = None  # currently running producer task
+
 # ── BFI live stream state (optional, set when --bfi-iface is given) ──────
 BFI_LATEST: dict = {}  # thread-safe-ish: written by bfi thread, read by producer
 _BFI_KEYS = [
@@ -302,6 +305,62 @@ async def _producer_replay() -> None:
         await asyncio.sleep(args.interval)
 
 
+# ── producer: pcap replay (BFI / CSI) ────────────────────────────────────
+async def _producer_pcap(pcap_path: str) -> None:
+    """Replay a .pcap file by extracting BFI features and streaming them."""
+    try:
+        from bfi_features import extract_features
+    except ImportError:
+        err = _build_message(
+            mode="replay", status="error", error="bfi_features import failed",
+            throughput_tx_mbps=0, throughput_rx_mbps=0, retry_rate=0,
+            tx_per_pct=0, rx_per_pct=0, rssi0=0, rssi1=0, rssi2=0, rssi3=0,
+            tx_mcs=None, tx_nss=None, tx_bw=None, tx_phymode=None, temp_c=0,
+        )
+        await _broadcast(err)
+        return
+
+    features = await asyncio.to_thread(extract_features, pcap_path)
+    if not features:
+        err = _build_message(
+            mode="replay", status="error", error=f"No BFI frames in {pcap_path}",
+            throughput_tx_mbps=0, throughput_rx_mbps=0, retry_rate=0,
+            tx_per_pct=0, rx_per_pct=0, rssi0=0, rssi1=0, rssi2=0, rssi3=0,
+            tx_mcs=None, tx_nss=None, tx_bw=None, tx_phymode=None, temp_c=0,
+        )
+        await _broadcast(err)
+        return
+
+    PLAYBACK["rows"] = features
+    PLAYBACK["total"] = len(features)
+    PLAYBACK["attack_start"] = -1
+    PLAYBACK["idx"] = 0
+    PLAYBACK["paused"] = False
+
+    while True:
+        feat = features[PLAYBACK["idx"]]
+        msg = _build_message(
+            mode="replay", status="ok", error=None,
+            throughput_tx_mbps=0, throughput_rx_mbps=0, retry_rate=0,
+            tx_per_pct=0, rx_per_pct=0, rssi0=0, rssi1=0, rssi2=0, rssi3=0,
+            tx_mcs=None, tx_nss=None, tx_bw=None, tx_phymode=None, temp_c=0,
+        )
+        # Overlay BFI fields
+        for k in _BFI_KEYS:
+            if k in feat:
+                msg[k] = feat[k]
+        score, is_anom = score_sample(msg)
+        msg["anomaly_score"] = score
+        msg["is_anomaly"] = is_anom
+        msg["index"] = PLAYBACK["idx"]
+        msg["total"] = PLAYBACK["total"]
+        msg["playing"] = not PLAYBACK["paused"]
+        await _broadcast(msg)
+        if not PLAYBACK["paused"]:
+            PLAYBACK["idx"] = (PLAYBACK["idx"] + 1) % PLAYBACK["total"]
+        await asyncio.sleep(args.interval)
+
+
 # ── task runner: localhost guard ───────────────────────────────────────────
 def _is_loopback(request: Request) -> bool:
     """Return True if the request came from a loopback address."""
@@ -430,6 +489,90 @@ def cmd_pattern(name: str, entry: dict) -> str:
     return f"^{cmd[0]}"
 
 
+# ── runtime session endpoints ─────────────────────────────────────────────
+async def _replay_files_endpoint(request: Request) -> JSONResponse:
+    """GET /replay-files — list .csv and .pcap files in data/."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    files = []
+    if data_dir.is_dir():
+        for ext in ("*.csv", "*.pcap"):
+            for f in sorted(data_dir.glob(ext)):
+                files.append(f.name)
+    return JSONResponse(files)
+
+
+async def _session_endpoint(request: Request) -> JSONResponse:
+    """POST /session — cancel current producer and start a new one."""
+    global _current_task
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    source = body.get("source", "")
+    if source not in ("replay", "live", "pcap"):
+        return JSONResponse({"error": "source must be replay|live|pcap"}, status_code=400)
+
+    # Cancel existing producer
+    if _current_task is not None and not _current_task.done():
+        _current_task.cancel()
+        try:
+            await _current_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _current_task = None
+
+    # Reset playback state
+    PLAYBACK["rows"] = []
+    PLAYBACK["total"] = 0
+    PLAYBACK["attack_start"] = -1
+    PLAYBACK["idx"] = 0
+    PLAYBACK["paused"] = False
+
+    if source == "replay":
+        file = body.get("file", "")
+        if not file:
+            return JSONResponse({"error": "file required for replay"}, status_code=400)
+        csv_path = Path(__file__).resolve().parent.parent / "data" / file
+        if not csv_path.is_file():
+            return JSONResponse({"error": f"file not found: {file}"}, status_code=404)
+        args.mode = "replay"
+        args.csv = str(csv_path)
+        _current_task = asyncio.create_task(_producer_replay())
+
+    elif source == "pcap":
+        file = body.get("file", "")
+        if not file:
+            return JSONResponse({"error": "file required for pcap"}, status_code=400)
+        pcap_path = Path(__file__).resolve().parent.parent / "data" / file
+        if not pcap_path.is_file():
+            return JSONResponse({"error": f"file not found: {file}"}, status_code=404)
+        args.mode = "replay"
+        _current_task = asyncio.create_task(_producer_pcap(str(pcap_path)))
+
+    elif source == "live":
+        args.mode = "live"
+        args.host = body.get("host", args.host)
+        args.user = body.get("user", args.user)
+        args.password = body.get("password", args.password)
+        args.iface = body.get("iface", args.iface)
+        _current_task = asyncio.create_task(_producer_live())
+
+    # Broadcast session info
+    detail = source
+    if source in ("replay", "pcap"):
+        detail = f"{source}: {body.get('file', '')}"
+    elif source == "live":
+        detail = f"live: {args.host}@{args.iface}"
+    session_msg = {"type": "session", "source": source, "detail": detail}
+    await _broadcast(session_msg)
+
+    return JSONResponse({"ok": True, "source": source})
+
+
 # ── BFI live stream thread ────────────────────────────────────────────────
 def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
     """Background thread: run bfi_features.stream_features and update BFI_LATEST."""
@@ -450,8 +593,11 @@ def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
 # ── lifespan: start/stop the producer (Starlette 1.x API) ─────────────────
 @asynccontextmanager
 async def _lifespan(app):
-    producer = _producer_replay if args.mode == "replay" else _producer_live
-    task = asyncio.create_task(producer())
+    global _current_task
+    if args.mode == "replay":
+        _current_task = asyncio.create_task(_producer_replay())
+    elif args.mode == "live":
+        _current_task = asyncio.create_task(_producer_live())
 
     # Optionally start BFI stream (PARALLEL to iwpriv poll)
     bfi_thread = None
@@ -466,7 +612,8 @@ async def _lifespan(app):
     try:
         yield
     finally:
-        task.cancel()
+        if _current_task is not None:
+            _current_task.cancel()
 
 
 # ── routes ────────────────────────────────────────────────────────────────
@@ -485,7 +632,7 @@ async def _ws_handler(websocket: WebSocket) -> None:
     attack_start = PLAYBACK["attack_start"] if args.mode == "replay" else -1
     meta = {
         "type": "meta",
-        "mode": args.mode,
+        "mode": args.mode or "idle",
         "total": total,
         "attack_start": attack_start,
         "interval": args.interval,
@@ -536,6 +683,8 @@ app = Starlette(
         Route("/", _homepage),
         Route("/ml", _ml_page),
         Route("/tasks", _tasks_endpoint),
+        Route("/replay-files", _replay_files_endpoint),
+        Route("/session", _session_endpoint, methods=["POST"]),
         Route("/run/{name}", _run_endpoint, methods=["POST"]),
         Route("/stop/{name}", _stop_endpoint, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
@@ -557,7 +706,7 @@ if __name__ == "__main__":
     p.add_argument("--password", default="REDACTED")
     p.add_argument("--iface", default="rai1")
     p.add_argument("--interval", type=float, default=2.0)
-    p.add_argument("--mode", choices=["live", "replay"], default="live")
+    p.add_argument("--mode", choices=["live", "replay"], default=None)
     p.add_argument("--csv", default="data/normal_iperf.csv")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--bind", default="127.0.0.1")
