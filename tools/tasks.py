@@ -44,7 +44,7 @@ TASK_REGISTRY: dict[str, dict] = {
             "tshark", "-i", "{mon}", "-w",
             str(_ROOT / "results" / "sessions" / "{run}_air.pcap"),
         ],
-        "privileged": True,
+        "privileged": False,  # dumpcap has cap_net_raw; user in wireshark group. pkexec/root breaks the file write.
         "description": "Capture beamforming frames to pcap via tshark.",
     },
     "start_attack": {

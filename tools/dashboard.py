@@ -398,6 +398,10 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     params = body if isinstance(body, dict) else {}
+    # default a run-id (empty {run} → "_air.pcap"); ensure the capture dir exists
+    if not params.get("run"):
+        params["run"] = time.strftime("%Y%m%d_%H%M%S")
+    (Path(__file__).resolve().parent.parent / "results" / "sessions").mkdir(parents=True, exist_ok=True)
 
     cmd = resolve_cmd(name, params)
     if cmd is None:
