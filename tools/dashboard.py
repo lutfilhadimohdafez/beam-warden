@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import csv
 import json
+import subprocess
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -23,15 +24,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gn630v_telemetry import compute_deltas, parse_iwpriv_stat
 from gn630v_telnet import GN630V
 from starlette.applications import Starlette
-from starlette.responses import FileResponse
+from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket
+
+from tasks import TASK_REGISTRY, resolve_cmd
 
 # ── module-level state read by the app ────────────────────────────────────
 args: argparse.Namespace  # set in __main__ before uvicorn.run
 clients: set[WebSocket] = set()
 latest_sample: dict | None = None
+
+# ── task runner state ─────────────────────────────────────────────────────
+# ponytail: localhost-only; this is a local research rig, not a public service.
+TASK_STATE: dict[str, dict] = {}  # name -> {"state": idle|running|done|failed, "pid": int|None, "code": int|None}
 
 _HERE = Path(__file__).resolve().parent
 
@@ -270,6 +278,134 @@ async def _producer_replay() -> None:
         await asyncio.sleep(args.interval)
 
 
+# ── task runner: localhost guard ───────────────────────────────────────────
+def _is_loopback(request: Request) -> bool:
+    """Return True if the request came from a loopback address."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
+async def _tasks_endpoint(request: Request) -> JSONResponse:
+    """GET /tasks — registry + current per-task state."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    out = {}
+    for name, entry in TASK_REGISTRY.items():
+        st = TASK_STATE.get(name, {"state": "idle", "pid": None, "code": None})
+        out[name] = {**entry, **st, "cmd": entry["cmd"]}
+    return JSONResponse(out)
+
+
+async def _run_endpoint(request: Request) -> JSONResponse:
+    """POST /run/{name} — spawn task, stream logs over websocket."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    name = request.path_params["name"]
+    entry = TASK_REGISTRY.get(name)
+    if entry is None:
+        return JSONResponse({"error": f"unknown task: {name}"}, status_code=404)
+
+    st = TASK_STATE.get(name, {"state": "idle", "pid": None, "code": None})
+    if st["state"] == "running":
+        return JSONResponse({"error": f"task {name} already running"}, status_code=409)
+
+    # Read shared params from POST body (optional)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    params = body if isinstance(body, dict) else {}
+
+    cmd = resolve_cmd(name, params)
+    if cmd is None:
+        return JSONResponse({"error": "failed to resolve command"}, status_code=500)
+
+    TASK_STATE[name] = {"state": "running", "pid": None, "code": None}
+
+    asyncio.create_task(_run_task(name, cmd, entry["privileged"]))
+    return JSONResponse({"ok": True, "task": name, "cmd": cmd})
+
+
+async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
+    """Spawn subprocess, stream stdout/stderr to all WS clients."""
+    # ponytail: pkexec wrapper for privileged tasks (ported from attack_gui)
+    if privileged:
+        proc_cmd = ["pkexec"] + cmd
+    else:
+        proc_cmd = cmd
+
+    proc = await asyncio.create_subprocess_exec(
+        *proc_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    TASK_STATE[name]["pid"] = proc.pid
+
+    async def _read_stream(stream, label: str):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            msg = {"type": "log", "task": name, "stream": label, "line": text}
+            await _broadcast(msg)
+
+    await asyncio.gather(
+        _read_stream(proc.stdout, "out"),
+        _read_stream(proc.stderr, "err"),
+    )
+    code = await proc.wait()
+    state = "done" if code == 0 else "failed"
+    TASK_STATE[name] = {"state": state, "pid": None, "code": code}
+    status_msg = {"type": "status", "task": name, "state": state, "code": code}
+    await _broadcast(status_msg)
+
+
+async def _stop_endpoint(request: Request) -> JSONResponse:
+    """POST /stop/{name} — kill a running task."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    name = request.path_params["name"]
+    entry = TASK_REGISTRY.get(name)
+    if entry is None:
+        return JSONResponse({"error": f"unknown task: {name}"}, status_code=404)
+
+    st = TASK_STATE.get(name, {"state": "idle", "pid": None, "code": None})
+    if st["state"] != "running":
+        return JSONResponse({"error": f"task {name} not running"}, status_code=409)
+
+    # ponytail: root-kill for privileged tasks (ported from attack_gui)
+    if entry["privileged"]:
+        try:
+            subprocess.run(
+                ["pkexec", "pkill", "-INT", "-f", cmd_pattern(name, entry)],
+                timeout=20,
+            )
+        except Exception:
+            pass
+    else:
+        pid = st.get("pid")
+        if pid:
+            try:
+                import signal as _signal
+                import os
+                os.kill(pid, _signal.SIGTERM)
+            except Exception:
+                pass
+
+    return JSONResponse({"ok": True, "task": name})
+
+
+def cmd_pattern(name: str, entry: dict) -> str:
+    """Build a pkill-safe regex for the task's command."""
+    cmd = entry["cmd"]
+    # Use the first non-shell argument as the pattern
+    for c in cmd:
+        if c not in ("sh", "-c", "python"):
+            return f"^{c}"
+    return f"^{cmd[0]}"
+
+
 # ── lifespan: start/stop the producer (Starlette 1.x API) ─────────────────
 @asynccontextmanager
 async def _lifespan(app):
@@ -347,6 +483,9 @@ app = Starlette(
     routes=[
         Route("/", _homepage),
         Route("/ml", _ml_page),
+        Route("/tasks", _tasks_endpoint),
+        Route("/run/{name}", _run_endpoint, methods=["POST"]),
+        Route("/stop/{name}", _stop_endpoint, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
     ],

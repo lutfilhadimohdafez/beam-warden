@@ -441,6 +441,200 @@
     background: var(--accent);
     color: #000;
   }
+
+  /* ---- MISSION CONTROL ---- */
+  .mc-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 3px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .mc-title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .mc-params {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mc-param {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .mc-param label {
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .mc-param input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    padding: 5px 8px;
+    width: 140px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .mc-param input:focus { border-color: var(--accent); }
+
+  .mc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+  }
+  .mc-task {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.2s;
+  }
+  .mc-task:hover { border-color: var(--accent); }
+  .mc-task-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .mc-task-label {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .mc-chip {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .mc-chip.idle { background: var(--border); color: var(--muted); }
+  .mc-chip.running { background: rgba(251,141,36,0.15); color: var(--accent); animation: pulse-text 1.2s ease-in-out infinite; }
+  .mc-chip.done { background: rgba(53,208,127,0.15); color: var(--ok); }
+  .mc-chip.failed { background: rgba(255,75,75,0.15); color: var(--danger); }
+  .mc-task-desc {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .mc-task-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .mc-btn {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+  .mc-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mc-btn.run { border-color: var(--ok); color: var(--ok); }
+  .mc-btn.run:hover { background: rgba(53,208,127,0.1); }
+  .mc-btn.stop { border-color: var(--danger); color: var(--danger); }
+  .mc-btn.stop:hover { background: rgba(255,75,75,0.1); }
+  .mc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ---- CONSOLE ---- */
+  .console-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .console-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .console-title {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .console-clear {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .console-clear:hover { border-color: var(--accent); color: var(--accent); }
+  .console-body {
+    height: 240px;
+    overflow-y: auto;
+    padding: 8px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.6;
+    background: #080a10;
+    position: relative;
+  }
+  .console-body.paused-by-hover::after {
+    content: 'PAUSED (hover)';
+    position: sticky;
+    bottom: 0;
+    display: block;
+    text-align: center;
+    background: rgba(251,141,36,0.12);
+    color: var(--accent);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    padding: 2px 0;
+  }
+  .console-line { white-space: pre-wrap; word-break: break-all; }
+  .console-line.out { color: var(--text); }
+  .console-line.err { color: var(--danger); }
+  .console-line .task-tag {
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 6px;
+  }
 </style>
 </head>
 <body>
@@ -472,6 +666,70 @@
       <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
       <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
     </div>
+  </div>
+
+  <!-- MISSION CONTROL -->
+  <div class="section-label">MISSION CONTROL</div>
+  <div class="mc-section">
+    <div class="mc-params">
+      <div class="mc-param">
+        <label>Monitor Iface</label>
+        <input id="mcMon" value="mon0" placeholder="mon0">
+      </div>
+      <div class="mc-param">
+        <label>Channel</label>
+        <input id="mcChannel" value="48" placeholder="48">
+      </div>
+      <div class="mc-param">
+        <label>AP BSSID</label>
+        <input id="mcAp" value="fe:7a:58:92:b6:31" placeholder="fe:7a:58:92:b6:31">
+      </div>
+      <div class="mc-param">
+        <label>Victim MAC</label>
+        <input id="mcVictim" value="d2:93:e5:7c:20:71" placeholder="d2:93:e5:7c:20:71">
+      </div>
+      <div class="mc-param">
+        <label>Alpha</label>
+        <input id="mcAlpha" value="1.0" placeholder="1.0">
+      </div>
+      <div class="mc-param">
+        <label>Offset</label>
+        <input id="mcOffset" value="33" placeholder="33">
+      </div>
+      <div class="mc-param">
+        <label>Type</label>
+        <input id="mcType" value="0xe0" placeholder="0xe0">
+      </div>
+      <div class="mc-param">
+        <label>CSV Path</label>
+        <input id="mcCsv" value="data/normal_iperf.csv" placeholder="data/normal_iperf.csv">
+      </div>
+      <div class="mc-param">
+        <label>PCAP Path</label>
+        <input id="mcPcap" value="" placeholder="path/to/file.pcap">
+      </div>
+      <div class="mc-param">
+        <label>Output Path</label>
+        <input id="mcOut" value="" placeholder="path/to/out.csv">
+      </div>
+      <div class="mc-param">
+        <label>Run Name</label>
+        <input id="mcRun" value="" placeholder="run_001">
+      </div>
+    </div>
+    <div class="mc-grid" id="mcGrid">
+      <div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">Loading tasks&hellip;</div>
+    </div>
+  </div>
+
+  <!-- CONSOLE -->
+  <div class="section-label">CONSOLE</div>
+  <div class="console-section">
+    <div class="console-header">
+      <div class="console-title">Live Output</div>
+      <button class="console-clear" id="consoleClear">Clear</button>
+    </div>
+    <div class="console-body" id="consoleBody"></div>
   </div>
 
   <!-- STAT TILES -->
@@ -799,10 +1057,21 @@
 
   /* ---- Handle telemetry sample ---- */
   function handleMessage(d) {
+    /* Route by type: log/status → Mission Control, meta/telemetry → existing */
+    if (d.type === "log") {
+      appendConsole(d.task, d.stream, d.line);
+      return;
+    }
+    if (d.type === "status") {
+      updateChip(d.task, d.state);
+      return;
+    }
     if (d.type === "meta") {
       applyMeta(d);
       return;
     }
+
+    /* existing telemetry handling below */
 
     $valTxTput.textContent = d.throughput_tx_mbps.toFixed(1);
     $valRetry.textContent  = d.retry_rate.toFixed(3);
@@ -928,6 +1197,173 @@
   }
 
   connect();
+
+  /* ---- MISSION CONTROL ---- */
+  var mcTasks = {};
+  var $mcGrid = document.getElementById("mcGrid");
+  var $consoleBody = document.getElementById("consoleBody");
+  var consoleAutoScroll = true;
+  var MAX_CONSOLE_LINES = 500;
+
+  function getMcParams() {
+    return {
+      mon: document.getElementById("mcMon").value.trim() || "mon0",
+      channel: document.getElementById("mcChannel").value.trim() || "48",
+      ap: document.getElementById("mcAp").value.trim(),
+      victim: document.getElementById("mcVictim").value.trim(),
+      alpha: document.getElementById("mcAlpha").value.trim() || "1.0",
+      offset: document.getElementById("mcOffset").value.trim() || "33",
+      type: document.getElementById("mcType").value.trim() || "0xe0",
+      csv: document.getElementById("mcCsv").value.trim() || "data/normal_iperf.csv",
+      pcap: document.getElementById("mcPcap").value.trim(),
+      out: document.getElementById("mcOut").value.trim(),
+      run: document.getElementById("mcRun").value.trim(),
+    };
+  }
+
+  function buildGrid(tasks) {
+    $mcGrid.innerHTML = "";
+    var names = Object.keys(tasks);
+    if (names.length === 0) {
+      $mcGrid.innerHTML = '<div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">No tasks registered.</div>';
+      return;
+    }
+    names.forEach(function (name) {
+      var t = tasks[name];
+      var card = document.createElement("div");
+      card.className = "mc-task";
+      card.setAttribute("data-task", name);
+
+      var header = document.createElement("div");
+      header.className = "mc-task-header";
+
+      var label = document.createElement("div");
+      label.className = "mc-task-label";
+      label.textContent = t.label || name;
+
+      var chip = document.createElement("span");
+      chip.className = "mc-chip idle";
+      chip.id = "chip-" + name;
+      chip.textContent = t.state || "idle";
+
+      header.appendChild(label);
+      header.appendChild(chip);
+
+      var desc = document.createElement("div");
+      desc.className = "mc-task-desc";
+      desc.textContent = t.description || "";
+
+      var actions = document.createElement("div");
+      actions.className = "mc-task-actions";
+
+      var runBtn = document.createElement("button");
+      runBtn.className = "mc-btn run";
+      runBtn.textContent = "Run";
+      runBtn.setAttribute("data-action", "run");
+      runBtn.setAttribute("data-task", name);
+
+      var stopBtn = document.createElement("button");
+      stopBtn.className = "mc-btn stop";
+      stopBtn.textContent = "Stop";
+      stopBtn.setAttribute("data-action", "stop");
+      stopBtn.setAttribute("data-task", name);
+      stopBtn.disabled = true;
+
+      actions.appendChild(runBtn);
+      actions.appendChild(stopBtn);
+
+      card.appendChild(header);
+      card.appendChild(desc);
+      card.appendChild(actions);
+      $mcGrid.appendChild(card);
+    });
+  }
+
+  function updateChip(name, state) {
+    var chip = document.getElementById("chip-" + name);
+    if (chip) {
+      chip.className = "mc-chip " + state;
+      chip.textContent = state;
+    }
+    /* toggle run/stop button enabled state */
+    var card = $mcGrid.querySelector('[data-task="' + name + '"]');
+    if (card) {
+      var runBtn = card.querySelector('[data-action="run"]');
+      var stopBtn = card.querySelector('[data-action="stop"]');
+      if (runBtn) runBtn.disabled = (state === "running");
+      if (stopBtn) stopBtn.disabled = (state !== "running");
+    }
+  }
+
+  function appendConsole(task, stream, line) {
+    var div = document.createElement("div");
+    div.className = "console-line " + (stream === "err" ? "err" : "out");
+    var tag = document.createElement("span");
+    tag.className = "task-tag";
+    tag.textContent = "[" + task + "]";
+    div.appendChild(tag);
+    div.appendChild(document.createTextNode(line));
+    $consoleBody.appendChild(div);
+
+    /* Trim old lines */
+    while ($consoleBody.childNodes.length > MAX_CONSOLE_LINES) {
+      $consoleBody.removeChild($consoleBody.firstChild);
+    }
+    if (consoleAutoScroll) {
+      $consoleBody.scrollTop = $consoleBody.scrollHeight;
+    }
+  }
+
+  /* Console pause-on-hover */
+  $consoleBody.addEventListener("mouseenter", function () {
+    consoleAutoScroll = false;
+    $consoleBody.classList.add("paused-by-hover");
+  });
+  $consoleBody.addEventListener("mouseleave", function () {
+    consoleAutoScroll = true;
+    $consoleBody.classList.remove("paused-by-hover");
+    $consoleBody.scrollTop = $consoleBody.scrollHeight;
+  });
+
+  /* Console clear */
+  document.getElementById("consoleClear").addEventListener("click", function () {
+    $consoleBody.innerHTML = "";
+  });
+
+  /* Run / Stop button clicks (event delegation) */
+  $mcGrid.addEventListener("click", function (e) {
+    var btn = e.target.closest(".mc-btn");
+    if (!btn) return;
+    var action = btn.getAttribute("data-action");
+    var name = btn.getAttribute("data-task");
+    if (action === "run") {
+      fetch("/run/" + name, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(getMcParams()),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.error) appendConsole(name, "err", "ERROR: " + d.error);
+      }).catch(function (e) {
+        appendConsole(name, "err", "FETCH ERROR: " + e);
+      });
+    } else if (action === "stop") {
+      fetch("/stop/" + name, { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.error) appendConsole(name, "err", "ERROR: " + d.error);
+        }).catch(function (e) {
+          appendConsole(name, "err", "FETCH ERROR: " + e);
+        });
+    }
+  });
+
+  /* Fetch task registry on load */
+  fetch("/tasks").then(function (r) { return r.json(); }).then(function (tasks) {
+    mcTasks = tasks;
+    buildGrid(tasks);
+  }).catch(function () {
+    $mcGrid.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.72rem;">Failed to load /tasks</div>';
+  });
 })();
 </script>
 </body>
