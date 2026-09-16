@@ -88,9 +88,10 @@ CALIB_BUFFER: list[list[float]] = []  # list of feature vectors
 _AUTO_CAPTURE: bool = False
 ANOMALY_HISTORY: deque[bool] = deque(maxlen=60)  # last 60 is_anomaly results
 _CALIB_CSV = Path(__file__).resolve().parent.parent / "data" / "normal_calib.csv"
-_CALIB_TARGET = 150
+_calib_target = 150
 _CALIB_MIN = 30
 _TRAIN_CMD = [sys.executable, str(Path(__file__).resolve().parent / "train_detector.py")]
+_HISTORY_PATH = Path(__file__).resolve().parent.parent / "models" / "training_history.json"
 
 
 def score_sample(msg: dict) -> tuple[float | None, bool]:
@@ -166,7 +167,7 @@ async def _broadcast(msg: dict) -> None:
     if msg.get("anomaly_score") is not None:
         ANOMALY_HISTORY.append(bool(msg.get("is_anomaly", False)))
     # Auto-capture: append one sample per broadcast while active
-    if _AUTO_CAPTURE and msg.get("anomaly_score") is not None and len(CALIB_BUFFER) < _CALIB_TARGET:
+    if _AUTO_CAPTURE and msg.get("anomaly_score") is not None and len(CALIB_BUFFER) < _calib_target:
         feats = DETECTOR["features"] if DETECTOR else [
             "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
             "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
@@ -175,7 +176,7 @@ async def _broadcast(msg: dict) -> None:
         vec = [float(msg.get(f, 0) or 0) for f in feats]
         CALIB_BUFFER.append(vec)
         _append_calib_csv(feats, vec)
-        calib_msg = {"type": "calib", "count": len(CALIB_BUFFER), "target": _CALIB_TARGET}
+        calib_msg = {"type": "calib", "count": len(CALIB_BUFFER), "target": _calib_target}
         payload_calib = json.dumps(calib_msg)
         dead_calib: list[WebSocket] = []
         for ws in clients:
@@ -676,6 +677,58 @@ def _read_normal_profile() -> dict | None:
     return profile
 
 
+# ── training history helpers ─────────────────────────────────────────────
+def _load_training_history() -> list[dict]:
+    """Load training history from JSON file. Returns empty list if missing."""
+    if not _HISTORY_PATH.is_file():
+        return []
+    try:
+        with _HISTORY_PATH.open() as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_training_history(entries: list[dict]) -> None:
+    """Save training history list to JSON file."""
+    _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _HISTORY_PATH.open("w") as f:
+        json.dump(entries, f, indent=2)
+
+
+def _seed_training_history() -> None:
+    """Seed initial model entry if history is empty. Best-effort."""
+    if _load_training_history():
+        return
+    if DETECTOR is None:
+        return
+    profile = _read_normal_profile()
+    n_samples = 0
+    ref = Path(__file__).resolve().parent.parent / "data" / "normal_iperf.csv"
+    if ref.is_file():
+        try:
+            with ref.open(newline="") as f:
+                n_samples = sum(1 for _ in csv.reader(f)) - 1
+        except Exception:
+            pass
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "n_samples": n_samples,
+        "source": "file:normal_iperf.csv",
+        "interval_s": 2.0,
+        "features": DETECTOR.get("features", []),
+        "training_fpr": None,
+        "feature_profile": profile or {},
+        "model_params": {
+            "n_estimators": 200,
+            "contamination": DETECTOR["model"].contamination if DETECTOR else None,
+        },
+        "note": "initial model (seeded on dashboard load)",
+    }
+    _save_training_history([entry])
+
+
 # ── model status endpoint ─────────────────────────────────────────────────
 async def _model_status(request: Request) -> JSONResponse:
     if not _is_loopback(request):
@@ -703,7 +756,7 @@ async def _model_status(request: Request) -> JSONResponse:
         "anomaly_rate": round(anomaly_rate, 4),
         "match_rate": round(1.0 - anomaly_rate, 4),
         "calib_count": len(CALIB_BUFFER),
-        "calib_target": _CALIB_TARGET,
+        "calib_target": _calib_target,
         "auto_capture": _AUTO_CAPTURE,
     })
 
@@ -714,8 +767,8 @@ async def _calibrate_capture(request: Request) -> JSONResponse:
         return JSONResponse({"error": "localhost only"}, status_code=403)
     if latest_sample is None:
         return JSONResponse({"error": "no live sample yet"}, status_code=400)
-    if len(CALIB_BUFFER) >= _CALIB_TARGET:
-        return JSONResponse({"error": "buffer full", "count": len(CALIB_BUFFER), "target": _CALIB_TARGET}, status_code=400)
+    if len(CALIB_BUFFER) >= _calib_target:
+        return JSONResponse({"error": "buffer full", "count": len(CALIB_BUFFER), "target": _calib_target}, status_code=400)
     features = DETECTOR["features"] if DETECTOR else [
         "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
         "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
@@ -724,7 +777,7 @@ async def _calibrate_capture(request: Request) -> JSONResponse:
     vec = [float(latest_sample.get(f, 0) or 0) for f in features]
     CALIB_BUFFER.append(vec)
     _append_calib_csv(features, vec)
-    return JSONResponse({"count": len(CALIB_BUFFER), "target": _CALIB_TARGET})
+    return JSONResponse({"count": len(CALIB_BUFFER), "target": _calib_target})
 
 
 async def _calibrate_reset(request: Request) -> JSONResponse:
@@ -737,7 +790,7 @@ async def _calibrate_reset(request: Request) -> JSONResponse:
         _CALIB_CSV.unlink(missing_ok=True)
     except Exception:
         pass
-    return JSONResponse({"ok": True, "count": 0, "target": _CALIB_TARGET})
+    return JSONResponse({"ok": True, "count": 0, "target": _calib_target})
 
 
 async def _calibrate_train(request: Request) -> JSONResponse:
@@ -766,10 +819,38 @@ async def _calibrate_train(request: Request) -> JSONResponse:
         return JSONResponse({"error": "model reload failed after training"}, status_code=500)
     # Compute training FPR from the output
     fpr_str = ""
+    fpr_val = None
     for line in stdout.decode().splitlines():
         if "false-positive" in line.lower():
             fpr_str = line.strip()
+            # try to extract numeric fpr
+            try:
+                import re as _re
+                m = _re.search(r"(\d+\.\d+)", fpr_str)
+                if m:
+                    fpr_val = float(m.group(1))
+            except Exception:
+                pass
             break
+    # Log training history
+    profile = _read_normal_profile()
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "n_samples": len(CALIB_BUFFER),
+        "source": "calibration",
+        "interval_s": args.interval,
+        "features": det.get("features", []),
+        "training_fpr": fpr_val,
+        "feature_profile": profile or {},
+        "model_params": {
+            "n_estimators": 200,
+            "contamination": det["model"].contamination if det else None,
+        },
+        "note": "",
+    }
+    history = _load_training_history()
+    history.append(entry)
+    _save_training_history(history)
     return JSONResponse({"ok": True, "fpr": fpr_str, "n_samples": len(CALIB_BUFFER)})
 
 
@@ -783,7 +864,32 @@ async def _calibrate_auto(request: Request) -> JSONResponse:
         body = {}
     enable = body.get("enable", not _AUTO_CAPTURE)
     _AUTO_CAPTURE = bool(enable)
-    return JSONResponse({"auto_capture": _AUTO_CAPTURE, "count": len(CALIB_BUFFER), "target": _CALIB_TARGET})
+    return JSONResponse({"auto_capture": _AUTO_CAPTURE, "count": len(CALIB_BUFFER), "target": _calib_target})
+
+
+async def _calibrate_target(request: Request) -> JSONResponse:
+    """POST /calibrate/target — set calibration target N for this run."""
+    global _calib_target
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    n = body.get("n")
+    if not isinstance(n, (int, float)) or int(n) < _CALIB_MIN:
+        return JSONResponse({"error": f"n must be integer >= {_CALIB_MIN}"}, status_code=400)
+    _calib_target = int(n)
+    return JSONResponse({"ok": True, "target": _calib_target})
+
+
+async def _training_history(request: Request) -> JSONResponse:
+    """GET /training-history — list past training runs, newest first."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    entries = _load_training_history()
+    entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    return JSONResponse(entries)
 
 
 # ── BFI live stream thread ────────────────────────────────────────────────
@@ -833,6 +939,7 @@ def _start_bfi(iface: str) -> None:
 @asynccontextmanager
 async def _lifespan(app):
     global _current_task
+    _seed_training_history()
     if args.mode == "replay":
         _current_task = asyncio.create_task(_producer_replay())
     elif args.mode == "live":
@@ -926,6 +1033,8 @@ app = Starlette(
         Route("/calibrate/reset", _calibrate_reset, methods=["POST"]),
         Route("/calibrate/train", _calibrate_train, methods=["POST"]),
         Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
+        Route("/calibrate/target", _calibrate_target, methods=["POST"]),
+        Route("/training-history", _training_history),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
     ],

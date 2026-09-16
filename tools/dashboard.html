@@ -1331,7 +1331,7 @@
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
         <div style="flex:1;min-width:200px;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);" id="learnCalibLabel">0 / 150</span>
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);" id="learnCalibLabel">0 / 150 normal samples (~2s each)</span>
             <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);" id="learnCalibAuto">auto: off</span>
           </div>
           <div style="background:var(--border);height:8px;position:relative;">
@@ -1339,6 +1339,10 @@
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <div class="mc-param" style="margin:0;">
+            <label>Target samples (N)</label>
+            <input id="learnCalibTargetN" type="number" value="150" min="30" max="100000" step="1" style="width:90px;">
+          </div>
           <button class="mc-btn run" id="learnCaptureBtn">Capture Current</button>
           <button class="mc-btn" id="learnAutoBtn">Auto-capture: OFF</button>
           <button class="mc-btn" id="learnRetrainBtn" disabled>Retrain</button>
@@ -1368,6 +1372,14 @@
       <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);margin-top:8px;">
         Anomaly rate: <span id="learnAnomalyRate">—</span> &middot; Samples in window: <span id="learnAnomalyWindow">0</span>
       </div>
+    </div>
+
+    <div class="section-label stagger">TRAINING HISTORY</div>
+    <div class="mc-section stagger">
+      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:12px;">
+        Click a row to inspect what the model learned on (feature profile + params).
+      </div>
+      <div id="learnHistoryList" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);">Loading&hellip;</div>
     </div>
 
   </div><!-- /tab-learning -->
@@ -2130,6 +2142,8 @@
   var $learnMatchVal      = document.getElementById("learnMatchVal");
   var $learnAnomalyRate   = document.getElementById("learnAnomalyRate");
   var $learnAnomalyWindow = document.getElementById("learnAnomalyWindow");
+  var $learnCalibTargetN  = document.getElementById("learnCalibTargetN");
+  var $learnHistoryList   = document.getElementById("learnHistoryList");
 
   function learnFetchStatus() {
     fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
@@ -2141,6 +2155,7 @@
       learnCalibCount = d.calib_count || 0;
       learnCalibTarget = d.calib_target || 150;
       learnAutoCapture = d.auto_capture || false;
+      $learnCalibTargetN.value = learnCalibTarget;
       learnUpdateCalibUI();
       learnUpdateMatch(d.match_rate, d.anomaly_rate);
       learnRenderProfile(d.normal_profile);
@@ -2192,7 +2207,7 @@
   }
 
   function learnUpdateCalibUI() {
-    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget;
+    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget + " normal samples (~2s each)";
     var pct = learnCalibTarget > 0 ? (learnCalibCount / learnCalibTarget) * 100 : 0;
     $learnCalibBar.style.width = Math.min(pct, 100) + "%";
     $learnCalibBar.style.background = learnCalibCount >= learnCalibTarget ? "var(--ok)" : "var(--accent)";
@@ -2271,6 +2286,7 @@
         $learnTrainResult.textContent = (d.fpr || "") + " — model reloaded";
         $learnTrainResult.style.color = "var(--ok)";
         learnFetchStatus();
+        learnFetchHistory();
       })
       .catch(function (e) {
         $learnTrainResult.textContent = "Fetch error: " + e;
@@ -2291,6 +2307,105 @@
       .catch(function () {});
   });
 
+  /* ---- Target N sync ---- */
+  $learnCalibTargetN.addEventListener("change", function () {
+    var n = parseInt($learnCalibTargetN.value, 10);
+    if (isNaN(n) || n < 30) { n = 30; $learnCalibTargetN.value = 30; }
+    if (n > 100000) { n = 100000; $learnCalibTargetN.value = 100000; }
+    fetch("/calibrate/target", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ n: n }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        learnCalibTarget = d.target;
+        learnUpdateCalibUI();
+      }
+    }).catch(function () {});
+  });
+
+  /* ---- Training history ---- */
+  function learnFetchHistory() {
+    fetch("/training-history").then(function (r) { return r.json(); }).then(function (entries) {
+      $learnHistoryList.innerHTML = "";
+      if (!entries || entries.length === 0) {
+        $learnHistoryList.textContent = "No training runs yet.";
+        return;
+      }
+      entries.forEach(function (entry, idx) {
+        var row = document.createElement("div");
+        row.style.cssText = "padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.2s;display:flex;align-items:center;gap:12px;";
+        var tsSpan = document.createElement("span");
+        tsSpan.style.cssText = "color:var(--text-bright);min-width:140px;";
+        tsSpan.textContent = entry.ts || "?";
+        var nSpan = document.createElement("span");
+        nSpan.style.cssText = "color:var(--accent);min-width:60px;";
+        nSpan.textContent = (entry.n_samples || 0) + " samples";
+        var srcSpan = document.createElement("span");
+        srcSpan.style.cssText = "color:var(--muted);min-width:90px;";
+        srcSpan.textContent = entry.source || "?";
+        var fprSpan = document.createElement("span");
+        fprSpan.style.cssText = "color:var(--muted-dim);";
+        fprSpan.textContent = entry.training_fpr !== null ? ("FPR: " + entry.training_fpr) : "";
+        row.appendChild(tsSpan);
+        row.appendChild(nSpan);
+        row.appendChild(srcSpan);
+        row.appendChild(fprSpan);
+
+        var detail = document.createElement("div");
+        detail.style.cssText = "display:none;padding:10px;background:var(--panel-2);border-bottom:1px solid var(--border);font-size:0.68rem;";
+        var profile = entry.feature_profile || {};
+        var feats = Object.keys(profile);
+        if (feats.length > 0) {
+          var tbl = document.createElement("table");
+          tbl.style.cssText = "width:100%;border-collapse:collapse;";
+          var thead = document.createElement("thead");
+          thead.innerHTML = '<tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px 8px;color:var(--muted);">Feature</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Mean</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Min</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Max</th></tr>';
+          tbl.appendChild(thead);
+          var tbody = document.createElement("tbody");
+          feats.forEach(function (f) {
+            var p = profile[f];
+            var tr = document.createElement("tr");
+            tr.style.borderBottom = "1px solid var(--border)";
+            tr.innerHTML = '<td style="padding:4px 8px;color:var(--text-bright);">' + f + '</td>' +
+              '<td style="padding:4px 8px;text-align:right;color:var(--text);">' + (p.mean !== undefined ? p.mean.toFixed(4) : "-") + '</td>' +
+              '<td style="padding:4px 8px;text-align:right;color:var(--muted);">' + (p.min !== undefined ? p.min.toFixed(4) : "-") + '</td>' +
+              '<td style="padding:4px 8px;text-align:right;color:var(--muted);">' + (p.max !== undefined ? p.max.toFixed(4) : "-") + '</td>';
+            tbody.appendChild(tr);
+          });
+          tbl.appendChild(tbody);
+          detail.appendChild(tbl);
+        }
+        var params = entry.model_params || {};
+        var paramDiv = document.createElement("div");
+        paramDiv.style.cssText = "margin-top:8px;color:var(--muted-dim);";
+        paramDiv.textContent = "Params: n_estimators=" + (params.n_estimators || "?") + ", contamination=" + (params.contamination !== undefined ? params.contamination : "?");
+        detail.appendChild(paramDiv);
+        if (entry.note) {
+          var noteDiv = document.createElement("div");
+          noteDiv.style.cssText = "margin-top:4px;color:var(--muted-dim);font-style:italic;";
+          noteDiv.textContent = entry.note;
+          detail.appendChild(noteDiv);
+        }
+
+        row.addEventListener("click", function () {
+          var isOpen = detail.style.display !== "none";
+          detail.style.display = isOpen ? "none" : "block";
+          row.style.background = isOpen ? "" : "var(--accent-dim)";
+        });
+        row.addEventListener("mouseenter", function () { row.style.background = "var(--panel-2)"; });
+        row.addEventListener("mouseleave", function () { row.style.background = detail.style.display !== "none" ? "var(--accent-dim)" : ""; });
+
+        $learnHistoryList.appendChild(row);
+        $learnHistoryList.appendChild(detail);
+      });
+    }).catch(function () {
+      $learnHistoryList.textContent = "Failed to load history.";
+    });
+  }
+
+  learnFetchHistory();
+
   learnFetchStatus();
 
   /* Periodically refresh model-status when Learning tab is visible */
@@ -2300,6 +2415,15 @@
       learnFetchStatus();
     }
   }, 3000);
+
+  /* Refresh training history when switching to Learning tab */
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.getAttribute("data-tab") === "learning") {
+        learnFetchHistory();
+      }
+    });
+  });
 
   /* ---- ROUTER FEED PANEL ---- */
   var $rfPanel   = document.getElementById("rfPanel");
