@@ -1026,6 +1026,149 @@
   .rf-body::-webkit-scrollbar-track { background: transparent; }
   .rf-body::-webkit-scrollbar-thumb { background: var(--border); }
   .rf-body::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
+
+  /* ---- IN-PAGE MODAL ---- */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 9000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 28px 32px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: var(--shadow-warm-lg);
+  }
+  .modal-title {
+    font-family: var(--font-display);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+  }
+  .modal-body {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .modal-btn {
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 18px;
+    border-radius: 0;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.25s, color 0.25s, background 0.25s;
+  }
+  .modal-btn:hover { border-color: var(--border-light); color: var(--accent); background: var(--accent-dim); }
+  .modal-btn.primary { border-color: var(--ok); color: var(--ok); }
+  .modal-btn.primary:hover { background: var(--ok); color: #0a0a0a; }
+  .modal-btn.danger { border-color: var(--danger); color: var(--danger); }
+  .modal-btn.danger:hover { background: var(--danger); color: #0a0a0a; }
+
+  /* ---- VERBOSE ERROR PANEL ---- */
+  .verbose-error {
+    display: none;
+    background: var(--danger-dim);
+    border: 1px solid rgba(240,72,72,0.25);
+    border-radius: 0;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--danger);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    position: relative;
+  }
+  .verbose-error.visible { display: block; }
+  .verbose-error-dismiss {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: 1px solid rgba(240,72,72,0.25);
+    border-radius: 0;
+    color: var(--danger);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .verbose-error-dismiss:hover { border-color: var(--danger); color: var(--text-bright); }
+
+  /* ---- SHUTDOWN BUTTON ---- */
+  .shutdown-btn {
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 14px;
+    border-radius: 0;
+    border: 1px solid var(--muted-dim);
+    background: var(--panel-2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.25s, color 0.25s, background 0.25s;
+  }
+  .shutdown-btn:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-dim); }
+
+  /* ---- BFI LOCKED PLACEHOLDER ---- */
+  .bfi-locked {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 20px 16px;
+    text-align: center;
+    box-shadow: var(--shadow-warm);
+  }
+  .bfi-locked-text {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .bfi-unlock-btn {
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 0;
+    border: 1px solid var(--border-light);
+    background: var(--accent-dim);
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.25s, color 0.25s;
+  }
+  .bfi-unlock-btn:hover { background: var(--accent); color: #0a0a0a; }
 </style>
 </head>
 <body>
@@ -1054,6 +1197,7 @@
         <span id="statusText">Disconnected</span>
       </div>
       <a href="/ml" class="nav-link">ML Engine &rarr;</a>
+      <button class="shutdown-btn" id="shutdownBtn">&#9211; Shut Down</button>
     </div>
   </div>
 
@@ -1111,6 +1255,12 @@
 
     <!-- ERROR BAR -->
     <div class="error-bar" id="errorBar"></div>
+
+    <!-- VERBOSE ERROR PANEL -->
+    <div class="verbose-error" id="verboseError">
+      <button class="verbose-error-dismiss" id="verboseDismiss">&times; Dismiss</button>
+      <div id="verboseErrorText"></div>
+    </div>
 
     <!-- LEFT COLUMN -->
     <div class="dash-col dash-left">
@@ -1187,6 +1337,10 @@
           <div class="tile-label">Psi Temporal</div>
           <div class="tile-value" id="valBfiPsiTemp">-</div>
         </div>
+      </div>
+      <div class="bfi-locked" id="bfiLocked" style="display:none;">
+        <div class="bfi-locked-text">BFI/CSI locked &mdash; monitor interface not up</div>
+        <button class="bfi-unlock-btn" id="bfiUnlockBtn">Enable BFI Monitor</button>
       </div>
     </div>
 
@@ -1425,6 +1579,18 @@
   <button class="pb-jump-btn" id="pbJumpAttack" style="display:none;">JUMP TO ATTACK</button>
   <div class="pb-readout" id="pbReadout">0 / 0</div>
   <div class="pb-interval" id="pbInterval"></div>
+</div>
+
+<!-- MODAL OVERLAY (shared for BFI unlock + shutdown confirm) -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="modal-btn" id="modalCancel">Cancel</button>
+      <button class="modal-btn primary" id="modalConfirm">Confirm</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/chart.umd.min.js"></script>

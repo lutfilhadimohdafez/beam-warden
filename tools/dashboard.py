@@ -10,6 +10,8 @@ import argparse
 import asyncio
 import csv
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -533,6 +535,14 @@ def cmd_pattern(name: str, entry: dict) -> str:
 
 
 # ── runtime session endpoints ─────────────────────────────────────────────
+async def _test_router_connection(host: str, user: str, password: str) -> None:
+    """Quick pre-connect test: open GN630V then close. Raises on failure."""
+    def _probe():
+        with GN630V(host, user, password):
+            pass
+    await asyncio.to_thread(_probe)
+
+
 async def _replay_files_endpoint(request: Request) -> JSONResponse:
     """GET /replay-files — list .csv and .pcap files in data/."""
     if not _is_loopback(request):
@@ -605,6 +615,14 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         args.user = body.get("user", args.user)
         args.password = body.get("password", args.password)
         args.iface = body.get("iface", args.iface)
+        # Quick pre-connect test before starting the producer
+        try:
+            await _test_router_connection(args.host, args.user, args.password)
+        except Exception as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc)},
+                status_code=502,
+            )
         bfi_iface = body.get("bfi_iface", "").strip()
         if bfi_iface:
             _start_bfi(bfi_iface)
@@ -937,6 +955,96 @@ async def _training_history(request: Request) -> JSONResponse:
     return JSONResponse(entries)
 
 
+# ── monitor-mode endpoints ────────────────────────────────────────────────
+async def _monitor_status(request: Request) -> JSONResponse:
+    """GET /monitor-status?iface=mon0 — check if iface exists and is monitor mode."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    iface = request.query_params.get("iface", "mon0")
+    result = {"iface": iface, "exists": False, "is_monitor": False}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "iw", "dev", iface, "info",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            result["exists"] = True
+            text = stdout.decode("utf-8", errors="replace")
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("type"):
+                    val = stripped.split(":", 1)[-1].strip().lower()
+                    if val == "monitor":
+                        result["is_monitor"] = True
+    except Exception:
+        pass
+    return JSONResponse(result)
+
+
+async def _monitor_setup(request: Request) -> JSONResponse:
+    """POST /monitor-setup — set iface to monitor mode via pkexec (privileged)."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    iface = body.get("iface", "mon0")
+    channel = body.get("channel", "48")
+    cmd = (
+        f"systemctl stop NetworkManager iwd; "
+        f"PHY=$(for p in /sys/class/ieee80211/phy*; do "
+        f"[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+        f"iw dev {iface} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
+        f"iw phy $PHY interface add {iface} type monitor; "
+        f"ip link set {iface} up; "
+        f"iw dev {iface} set channel {channel}; "
+        f"iw dev {iface} info | grep -E 'type|channel'"
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pkexec", "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode("utf-8", errors="replace").strip()
+            return JSONResponse(
+                {"ok": False, "error": err or f"pkexec exit code {proc.returncode}"},
+                status_code=500,
+            )
+        return JSONResponse({"ok": True, "output": stdout.decode("utf-8", errors="replace").strip()})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+# ── shutdown endpoint ─────────────────────────────────────────────────────
+async def _shutdown(request: Request) -> JSONResponse:
+    """POST /shutdown — stop producer + BFI, then kill the server process."""
+    global _current_task
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    # Stop BFI stream
+    _stop_bfi()
+    # Cancel current producer
+    if _current_task is not None and not _current_task.done():
+        _current_task.cancel()
+        try:
+            await _current_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _current_task = None
+    # Schedule SIGTERM after response is sent
+    def _kill():
+        time.sleep(0.3)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_kill, daemon=True).start()
+    return JSONResponse({"ok": True})
+
+
 # ── BFI live stream thread ────────────────────────────────────────────────
 def _bfi_stream_thread(iface: str, window: int, stop_event: threading.Event) -> None:
     """Background thread: run bfi_features.stream_features and update BFI_LATEST."""
@@ -1081,6 +1189,9 @@ app = Starlette(
         Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
         Route("/calibrate/target", _calibrate_target, methods=["POST"]),
         Route("/training-history", _training_history),
+        Route("/monitor-status", _monitor_status),
+        Route("/monitor-setup", _monitor_setup, methods=["POST"]),
+        Route("/shutdown", _shutdown, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
     ],
