@@ -317,12 +317,16 @@ def stream_features(
     iface: str,
     duration: int = 0,
     window: int = 10,
+    stop_event: threading.Event | None = None,
 ) -> Iterator[Dict[str, float]]:
     """Yield feature dicts from live BFI capture on *iface*.
 
     Uses a background tshark capture writing to a temp pcap, polled
     periodically for new category-30 frames.  Temporal-var window state
     is maintained across yielded frames.
+
+    If *stop_event* is provided, setting it breaks the poll loop promptly
+    and terminates the tshark subprocess.
 
     ponytail: capture-to-tmpfile-then-decode — true real-time raw-byte
     extraction from a live tshark pipe is not viable (tshark -x blocks).
@@ -332,26 +336,33 @@ def stream_features(
     tmp_path = tmp.name
     tmp.close()
 
-    stop_event = threading.Event()
+    internal_stop = threading.Event()
     err_holder: list[str] = []
+    cap_proc: list = []
 
     def _capture():
+        # NOTE: tshark rejects a display filter (-Y) together with live capture-to-file
+        # ("Display filters aren't supported when capturing and saving"). Capture all
+        # frames; the decode step (_live_meta_rows) filters category-30 from the pcap.
         cmd = [
             "tshark", "-i", iface,
-            "-Y", "wlan.fixed.category_code==30",
             "-w", tmp_path,
         ]
         if duration > 0:
             cmd += ["-a", f"duration:{duration}"]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=(duration + 60) if duration > 0 else None)
-            if proc.returncode != 0 and proc.stderr:
-                err_holder.append(proc.stderr)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            cap_proc.append(proc)
+            proc.wait()
+            if proc.returncode != 0:
+                try:
+                    err_holder.append(proc.stderr.read().decode())
+                except Exception:
+                    pass
         except Exception as e:
             err_holder.append(str(e))
         finally:
-            stop_event.set()
+            internal_stop.set()
 
     cap_thread = threading.Thread(target=_capture, daemon=True)
     cap_thread.start()
@@ -363,7 +374,9 @@ def stream_features(
     deadline = time.time() + duration if duration > 0 else float("inf")
 
     try:
-        while not stop_event.is_set() and time.time() < deadline:
+        while not internal_stop.is_set() and time.time() < deadline:
+            if stop_event is not None and stop_event.is_set():
+                break
             time.sleep(poll_interval)
 
             if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 24:
@@ -398,7 +411,12 @@ def stream_features(
                     yield feat
 
     finally:
-        stop_event.set()
+        internal_stop.set()
+        for proc in cap_proc:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
         cap_thread.join(timeout=5)
         try:
             os.unlink(tmp_path)

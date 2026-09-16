@@ -48,6 +48,8 @@ _BFI_KEYS = [
     "bfi_phi_mean", "bfi_psi_mean", "bfi_angle_var",
     "bfi_subcarrier_var", "bfi_phi_temporal_var", "bfi_psi_temporal_var",
 ]
+_bfi_thread: threading.Thread | None = None
+_bfi_stop: threading.Event | None = None
 
 
 def _merge_bfi(msg: dict) -> dict:
@@ -565,6 +567,9 @@ async def _session_endpoint(request: Request) -> JSONResponse:
             pass
         _current_task = None
 
+    # Stop BFI stream on every session switch
+    _stop_bfi()
+
     # Reset playback state
     PLAYBACK["rows"] = []
     PLAYBACK["total"] = 0
@@ -599,6 +604,9 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         args.user = body.get("user", args.user)
         args.password = body.get("password", args.password)
         args.iface = body.get("iface", args.iface)
+        bfi_iface = body.get("bfi_iface", "").strip()
+        if bfi_iface:
+            _start_bfi(bfi_iface)
         _current_task = asyncio.create_task(_producer_live())
 
     # Broadcast session info
@@ -607,6 +615,8 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         detail = f"{source}: {body.get('file', '')}"
     elif source == "live":
         detail = f"live: {args.host}@{args.iface}"
+        if getattr(args, "bfi_iface", None):
+            detail += f" +bfi:{args.bfi_iface}"
     session_msg = {"type": "session", "source": source, "detail": detail}
     await _broadcast(session_msg)
 
@@ -777,7 +787,7 @@ async def _calibrate_auto(request: Request) -> JSONResponse:
 
 
 # ── BFI live stream thread ────────────────────────────────────────────────
-def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
+def _bfi_stream_thread(iface: str, window: int, stop_event: threading.Event) -> None:
     """Background thread: run bfi_features.stream_features and update BFI_LATEST."""
     try:
         from bfi_features import stream_features
@@ -785,12 +795,38 @@ def _bfi_stream_thread(iface: str, duration: int, window: int) -> None:
         print("[BFI] bfi_features import failed — BFI stream disabled", file=sys.stderr)
         return
     try:
-        for feat in stream_features(iface, duration=duration, window=window):
+        for feat in stream_features(iface, duration=0, window=window, stop_event=stop_event):
             for k in _BFI_KEYS:
                 if k in feat:
                     BFI_LATEST[k] = feat[k]
     except Exception as exc:
         print(f"[BFI] stream error: {exc}", file=sys.stderr)
+
+
+def _stop_bfi() -> None:
+    """Stop the running BFI stream thread (no-op if none running)."""
+    global _bfi_thread, _bfi_stop
+    if _bfi_thread is not None and _bfi_thread.is_alive():
+        if _bfi_stop is not None:
+            _bfi_stop.set()
+        _bfi_thread.join(timeout=2)
+    _bfi_thread = None
+    _bfi_stop = None
+    BFI_LATEST.clear()
+
+
+def _start_bfi(iface: str) -> None:
+    """Start a BFI stream thread for *iface* (stops any existing one first)."""
+    global _bfi_thread, _bfi_stop
+    _stop_bfi()
+    args.bfi_iface = iface
+    _bfi_stop = threading.Event()
+    _bfi_thread = threading.Thread(
+        target=_bfi_stream_thread,
+        args=(iface, 10, _bfi_stop),
+        daemon=True,
+    )
+    _bfi_thread.start()
 
 
 # ── lifespan: start/stop the producer (Starlette 1.x API) ─────────────────
@@ -803,18 +839,13 @@ async def _lifespan(app):
         _current_task = asyncio.create_task(_producer_live())
 
     # Optionally start BFI stream (PARALLEL to iwpriv poll)
-    bfi_thread = None
     if getattr(args, "bfi_iface", None):
-        bfi_thread = threading.Thread(
-            target=_bfi_stream_thread,
-            args=(args.bfi_iface, 0, 10),
-            daemon=True,
-        )
-        bfi_thread.start()
+        _start_bfi(args.bfi_iface)
 
     try:
         yield
     finally:
+        _stop_bfi()
         if _current_task is not None:
             _current_task.cancel()
 

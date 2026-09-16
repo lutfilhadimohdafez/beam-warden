@@ -1099,6 +1099,11 @@
           <label>Iface</label>
           <input id="sessionIface" value="rai1" placeholder="rai1">
         </div>
+        <div class="session-field">
+          <label>BFI monitor iface</label>
+          <input id="sessionBfiIface" value="" placeholder="mon0">
+          <span style="font-family:var(--font-mono);font-size:0.52rem;color:var(--muted-dim);margin-top:2px;">off-air CSI; needs monitor mode (Command Center → Setup Monitor)</span>
+        </div>
         <button class="session-start-btn" id="sessionLiveConnect">Connect</button>
       </div>
       <div class="session-status" id="sessionStatus">no session &mdash; pick a source</div>
@@ -1156,7 +1161,7 @@
           <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
         </div>
       </div>
-      <div class="section-label stagger">BFI / CSI STREAM</div>
+      <div class="section-label stagger" id="bfiSectionLabel">BFI / CSI STREAM</div>
       <div class="tiles stagger" id="bfiPanel">
         <div class="tile">
           <div class="tile-label">Phi Mean</div>
@@ -1539,6 +1544,7 @@
       user: document.getElementById("sessionUser").value.trim(),
       password: document.getElementById("sessionPassword").value,
       iface: document.getElementById("sessionIface").value.trim(),
+      bfi_iface: document.getElementById("sessionBfiIface").value.trim(),
     });
   });
 
@@ -1771,6 +1777,16 @@
       rfFeedMode = d.source || "idle";
       rfFeedDetail = d.detail || "";
       rfUpdateTitle();
+      /* Update BFI / CSI section label */
+      var $bfiLabel = document.getElementById("bfiSectionLabel");
+      if ($bfiLabel) {
+        if (d.detail && d.detail.indexOf("+bfi:") >= 0) {
+          var bfiPart = d.detail.split("+bfi:")[1];
+          $bfiLabel.textContent = "BFI / CSI STREAM \u00B7 live: " + bfiPart;
+        } else {
+          $bfiLabel.textContent = "BFI / CSI STREAM \u00B7 no BFI source";
+        }
+      }
       return;
     }
     if (d.type === "calib") {
