@@ -183,6 +183,7 @@ async def _replay_broadcast_current() -> None:
         tx_phymode=row.get("tx_phymode") or None,
         temp_c=int(float(row["temp_c"])),
     )
+    msg["raw"] = repr(row)
     score, is_anom = score_sample(msg)
     msg["anomaly_score"] = score
     msg["is_anomaly"] = is_anom
@@ -236,6 +237,7 @@ async def _producer_live() -> None:
                 tx_phymode=parsed["tx_phymode"],
                 temp_c=parsed["temp_c"],
             )
+            msg["raw"] = text
             _merge_bfi(msg)
             score, is_anom = score_sample(msg)
             msg["anomaly_score"] = score
@@ -345,7 +347,7 @@ async def _producer_pcap(pcap_path: str) -> None:
             tx_per_pct=0, rx_per_pct=0, rssi0=0, rssi1=0, rssi2=0, rssi3=0,
             tx_mcs=None, tx_nss=None, tx_bw=None, tx_phymode=None, temp_c=0,
         )
-        # Overlay BFI fields
+        msg["raw"] = f"pcap frame {PLAYBACK['idx']}: {', '.join(f'{k}={v:.4f}' for k, v in feat.items() if isinstance(v, (int, float)))}"
         for k in _BFI_KEYS:
             if k in feat:
                 msg[k] = feat[k]

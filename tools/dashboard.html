@@ -889,6 +889,143 @@
   .console-body::-webkit-scrollbar-track { background: transparent; }
   .console-body::-webkit-scrollbar-thumb { background: var(--border); }
   .console-body::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
+
+  /* ---- SINGLE-VIEWPORT DASHBOARD LAYOUT (desktop) ---- */
+  @media (min-width: 1100px) {
+    .container {
+      max-width: none;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+    }
+    .header, .tab-bar { flex-shrink: 0; }
+    #tab-dashboard.active {
+      display: grid;
+      grid-template-columns: 1fr 1.1fr 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #tab-dashboard.active > .session-bar { grid-column: 1 / -1; }
+    #tab-dashboard.active > .error-bar { grid-column: 1 / -1; }
+    .dash-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .dash-col .chart-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .dash-col .chart-wrap { flex: 1; min-height: 0; }
+    .dash-col .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+    .dash-center {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .dash-center::-webkit-scrollbar { width: 5px; }
+    .dash-center::-webkit-scrollbar-track { background: transparent; }
+    .dash-center::-webkit-scrollbar-thumb { background: var(--border); }
+    .dash-center .detect-panel { flex-shrink: 0; margin-bottom: 0; }
+    .dash-center .section-label { flex-shrink: 0; margin-bottom: 0; }
+    .dash-center .tiles { flex-shrink: 0; margin-bottom: 0; }
+  }
+
+  /* ---- ROUTER FEED FLOATING PANEL ---- */
+  .router-feed-toggle {
+    position: fixed;
+    bottom: 56px;
+    right: 16px;
+    z-index: 1100;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .router-feed-toggle:hover { color: var(--text-bright); border-color: var(--border-light); }
+  .router-feed-panel {
+    position: fixed;
+    z-index: 1100;
+    width: 460px;
+    bottom: 56px;
+    right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: var(--shadow-warm-lg);
+    display: flex;
+    flex-direction: column;
+  }
+  .router-feed-panel.hidden { display: none; }
+  .rf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    cursor: move;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .rf-title {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--muted-dim);
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
+  .rf-btns { display: flex; gap: 6px; }
+  .rf-btn {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 1px 7px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+    line-height: 1.4;
+  }
+  .rf-btn:hover { color: var(--text-bright); border-color: var(--border-light); }
+  .rf-body {
+    height: 220px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 400;
+    line-height: 1.55;
+    background: #08090c;
+    color: var(--muted);
+  }
+  .rf-line { white-space: pre-wrap; word-break: break-all; }
+  .rf-line .rf-ts { color: var(--muted-dim); margin-right: 6px; }
+  .rf-line .rf-raw { color: var(--text); }
+  .rf-body::-webkit-scrollbar { width: 5px; }
+  .rf-body::-webkit-scrollbar-track { background: transparent; }
+  .rf-body::-webkit-scrollbar-thumb { background: var(--border); }
+  .rf-body::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 </style>
 </head>
 <body>
@@ -968,77 +1105,8 @@
     <!-- ERROR BAR -->
     <div class="error-bar" id="errorBar"></div>
 
-    <!-- DETECTION HERO -->
-    <div class="detect-panel stagger">
-      <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
-      <div class="detect-score-wrap">
-        <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
-        <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
-      </div>
-    </div>
-
-    <!-- TELEMETRY TILES -->
-    <div class="section-label stagger">TELEMETRY</div>
-    <div class="tiles stagger">
-      <div class="tile">
-        <div class="tile-label">TX Throughput</div>
-        <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Retry Rate</div>
-        <div class="tile-value" id="valRetry">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">TX PER</div>
-        <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">RSSI 0</div>
-        <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">TX MCS</div>
-        <div class="tile-value" id="valMcs">-</div>
-        <div class="tile-sub" id="valMcsSub"></div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Temp</div>
-        <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
-      </div>
-    </div>
-
-    <!-- BFI / CSI PANEL -->
-    <div class="section-label stagger">BFI / CSI STREAM</div>
-    <div class="tiles stagger" id="bfiPanel">
-      <div class="tile">
-        <div class="tile-label">Phi Mean</div>
-        <div class="tile-value" id="valBfiPhi">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Psi Mean</div>
-        <div class="tile-value" id="valBfiPsi">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Angle Var</div>
-        <div class="tile-value" id="valBfiAngleVar">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">SC Var</div>
-        <div class="tile-value" id="valBfiScVar">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Phi Temporal</div>
-        <div class="tile-value" id="valBfiPhiTemp">-</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Psi Temporal</div>
-        <div class="tile-value" id="valBfiPsiTemp">-</div>
-      </div>
-    </div>
-
-    <!-- CHARTS -->
-    <div class="section-label stagger">TIME SERIES</div>
-    <div class="charts stagger">
+    <!-- LEFT COLUMN -->
+    <div class="dash-col dash-left">
       <div class="chart-card">
         <div class="chart-title">TX Throughput (Mbps)</div>
         <div class="chart-wrap"><canvas id="chartTxTput"></canvas></div>
@@ -1047,6 +1115,76 @@
         <div class="chart-title">Retry Rate</div>
         <div class="chart-wrap"><canvas id="chartRetry"></canvas></div>
       </div>
+    </div>
+
+    <!-- CENTER COLUMN (hero + tiles) -->
+    <div class="dash-center">
+      <div class="detect-panel stagger">
+        <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
+        <div class="detect-score-wrap">
+          <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
+          <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
+        </div>
+      </div>
+      <div class="section-label stagger">TELEMETRY</div>
+      <div class="tiles stagger">
+        <div class="tile">
+          <div class="tile-label">TX Throughput</div>
+          <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Retry Rate</div>
+          <div class="tile-value" id="valRetry">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">TX PER</div>
+          <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">RSSI 0</div>
+          <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">TX MCS</div>
+          <div class="tile-value" id="valMcs">-</div>
+          <div class="tile-sub" id="valMcsSub"></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Temp</div>
+          <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
+        </div>
+      </div>
+      <div class="section-label stagger">BFI / CSI STREAM</div>
+      <div class="tiles stagger" id="bfiPanel">
+        <div class="tile">
+          <div class="tile-label">Phi Mean</div>
+          <div class="tile-value" id="valBfiPhi">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Psi Mean</div>
+          <div class="tile-value" id="valBfiPsi">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Angle Var</div>
+          <div class="tile-value" id="valBfiAngleVar">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">SC Var</div>
+          <div class="tile-value" id="valBfiScVar">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Phi Temporal</div>
+          <div class="tile-value" id="valBfiPhiTemp">-</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Psi Temporal</div>
+          <div class="tile-value" id="valBfiPsiTemp">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="dash-col dash-right">
       <div class="chart-card">
         <div class="chart-title">Packet Error Rate (%)</div>
         <div class="chart-wrap"><canvas id="chartPer"></canvas></div>
@@ -1132,6 +1270,21 @@
 
   </div><!-- /tab-command-center -->
 
+</div>
+
+<!-- ROUTER FEED TOGGLE -->
+<button class="router-feed-toggle" id="rfToggle">RAW FEED</button>
+
+<!-- ROUTER FEED PANEL -->
+<div class="router-feed-panel hidden" id="rfPanel">
+  <div class="rf-header" id="rfHeader">
+    <div class="rf-title" id="rfTitle">ROUTER FEED &middot; idle</div>
+    <div class="rf-btns">
+      <button class="rf-btn" id="rfMinBtn" title="Minimize">&minus;</button>
+      <button class="rf-btn" id="rfHideBtn" title="Hide">&times;</button>
+    </div>
+  </div>
+  <div class="rf-body" id="rfBody"></div>
 </div>
 
 <!-- PLAYBACK BAR -->
@@ -1518,8 +1671,14 @@
     }
     if (d.type === "session") {
       $sessionStatus.textContent = d.detail || d.source;
+      rfFeedMode = d.source || "idle";
+      rfFeedDetail = d.detail || "";
+      rfUpdateTitle();
       return;
     }
+
+    /* Router feed: stream raw output */
+    if (d.raw) rfAddLine(d.raw);
 
     /* existing telemetry handling below */
 
@@ -1830,6 +1989,139 @@
   }).catch(function () {
     $mcGrid.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.72rem;">Failed to load /tasks</div>';
   });
+
+  /* ---- ROUTER FEED PANEL ---- */
+  var $rfPanel   = document.getElementById("rfPanel");
+  var $rfHeader  = document.getElementById("rfHeader");
+  var $rfTitle   = document.getElementById("rfTitle");
+  var $rfBody    = document.getElementById("rfBody");
+  var $rfToggle  = document.getElementById("rfToggle");
+  var $rfMinBtn  = document.getElementById("rfMinBtn");
+  var $rfHideBtn = document.getElementById("rfHideBtn");
+  var rfMaxLines = 200;
+  var rfFeedMode = "idle";
+  var rfFeedDetail = "";
+  var rfDragState = { active: false, ox: 0, oy: 0 };
+
+  function rfAddLine(raw) {
+    if (!raw) return;
+    var div = document.createElement("div");
+    div.className = "rf-line";
+    var ts = document.createElement("span");
+    ts.className = "rf-ts";
+    var now = new Date();
+    ts.textContent = String(now.getHours()).padStart(2, "0") + ":" +
+      String(now.getMinutes()).padStart(2, "0") + ":" +
+      String(now.getSeconds()).padStart(2, "0");
+    var txt = document.createElement("span");
+    txt.className = "rf-raw";
+    txt.textContent = raw;
+    div.appendChild(ts);
+    div.appendChild(txt);
+    $rfBody.appendChild(div);
+    while ($rfBody.childNodes.length > rfMaxLines) {
+      $rfBody.removeChild($rfBody.firstChild);
+    }
+    $rfBody.scrollTop = $rfBody.scrollHeight;
+  }
+
+  function rfUpdateTitle() {
+    var src = rfFeedMode === "live" ? "live: " + rfFeedDetail :
+              rfFeedMode === "replay" ? "replay: " + rfFeedDetail :
+              rfFeedMode === "pcap" ? "pcap: " + rfFeedDetail : "idle";
+    $rfTitle.textContent = "ROUTER FEED \u00B7 " + src;
+  }
+
+  function rfShow() {
+    $rfPanel.classList.remove("hidden");
+    $rfToggle.style.display = "none";
+    try { localStorage.setItem("rf-hidden", "0"); } catch (e) {}
+  }
+  function rfHide() {
+    $rfPanel.classList.add("hidden");
+    $rfToggle.style.display = "";
+    try { localStorage.setItem("rf-hidden", "1"); } catch (e) {}
+  }
+  function rfMinimize() {
+    $rfBody.style.display = "none";
+    $rfMinBtn.textContent = "+";
+    $rfMinBtn.title = "Expand";
+    $rfMinBtn.onclick = rfExpand;
+    try { localStorage.setItem("rf-collapsed", "1"); } catch (e) {}
+  }
+  function rfExpand() {
+    $rfBody.style.display = "";
+    $rfMinBtn.textContent = "\u2212";
+    $rfMinBtn.title = "Minimize";
+    $rfMinBtn.onclick = rfMinimize;
+    try { localStorage.setItem("rf-collapsed", "0"); } catch (e) {}
+    $rfBody.scrollTop = $rfBody.scrollHeight;
+  }
+
+  $rfToggle.addEventListener("click", rfShow);
+  $rfHideBtn.addEventListener("click", rfHide);
+  $rfMinBtn.addEventListener("click", rfMinimize);
+
+  /* Drag */
+  function rfDragStart(px, py) {
+    var rect = $rfPanel.getBoundingClientRect();
+    rfDragState.active = true;
+    rfDragState.ox = px - rect.left;
+    rfDragState.oy = py - rect.top;
+    $rfPanel.style.transition = "none";
+  }
+  function rfDragMove(px, py) {
+    if (!rfDragState.active) return;
+    var pw = $rfPanel.offsetWidth;
+    var ph = $rfPanel.offsetHeight;
+    var x = Math.max(0, Math.min(px - rfDragState.ox, window.innerWidth - pw));
+    var y = Math.max(0, Math.min(py - rfDragState.oy, window.innerHeight - ph));
+    $rfPanel.style.left = x + "px";
+    $rfPanel.style.top  = y + "px";
+    $rfPanel.style.right = "auto";
+    $rfPanel.style.bottom = "auto";
+  }
+  function rfDragEnd() {
+    if (!rfDragState.active) return;
+    rfDragState.active = false;
+    $rfPanel.style.transition = "";
+    try {
+      localStorage.setItem("rf-pos", JSON.stringify({
+        left: $rfPanel.style.left,
+        top: $rfPanel.style.top,
+      }));
+    } catch (e) {}
+  }
+  $rfHeader.addEventListener("mousedown", function (e) {
+    if (e.target.closest(".rf-btn")) return;
+    e.preventDefault();
+    rfDragStart(e.clientX, e.clientY);
+  });
+  document.addEventListener("mousemove", function (e) { rfDragMove(e.clientX, e.clientY); });
+  document.addEventListener("mouseup", rfDragEnd);
+  $rfHeader.addEventListener("touchstart", function (e) {
+    if (e.target.closest(".rf-btn")) return;
+    var t = e.touches[0];
+    rfDragStart(t.clientX, t.clientY);
+  }, { passive: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!rfDragState.active) return;
+    var t = e.touches[0];
+    rfDragMove(t.clientX, t.clientY);
+  }, { passive: true });
+  document.addEventListener("touchend", rfDragEnd);
+
+  /* Restore saved state */
+  try {
+    var rfPos = localStorage.getItem("rf-pos");
+    if (rfPos) {
+      var p = JSON.parse(rfPos);
+      if (p.left) { $rfPanel.style.left = p.left; $rfPanel.style.right = "auto"; }
+      if (p.top)  { $rfPanel.style.top = p.top; $rfPanel.style.bottom = "auto"; }
+    }
+    if (localStorage.getItem("rf-hidden") === "1") rfHide(); else rfShow();
+    if (localStorage.getItem("rf-collapsed") === "1") rfMinimize(); else rfExpand();
+  } catch (e) {}
 })();
 </script>
 </body>
