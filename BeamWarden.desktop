@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Beam Warden
+GenericName=Beamforming Attack & Detection
+Comment=Launch the Beam Warden dashboard / Command Center
+Exec=/home/lutfil/fyp/run_beamwarden.sh
+Icon=/home/lutfil/fyp/tools/static/beamwarden.svg
+Terminal=true
+Categories=Network;
+Keywords=wifi;beamforming;bfi;attack;detection;dashboard;
