@@ -23,7 +23,7 @@ without touching the Wi-Fi protocol itself.
 |---|-----------|--------|--------|
 | 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **injection proven 30/30 on real target**; forge step pending HE port (see §6) |
 | 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — 150-sample normal dataset + live dashboard |
-| 3 | ML anomaly detection | ≥55% accuracy | 🟡 designed (Isolation Forest); unblocks after Obj-1 attack data |
+| 3 | ML anomaly detection | ≥55% accuracy | 🟡 Isolation Forest built + wired; **BFI→CSI feature pipeline validated** (V unitary 1e-16) and detectable on synthetic attack (98.8%); real-world accuracy pending Obj-1 attack data from a 4×4 AP |
 
 **Proven on hardware this cycle:** the attacker (Alfa AWUS036ACM) injects crafted
 802.11 frames onto the target's channel (30/30 ACKs); the target (Skyworth GN630v,
@@ -242,6 +242,57 @@ then plug those into `main_su`. Turns "decode HE from scratch" into "set 4 value
 attacks are rare and varied. Unsupervised anomaly detection trains on normal and
 flags whatever "isolates" too easily — catching an attack it never trained on.
 
+### 7.1 How the ML engine actually works
+
+The engine **never learns what an attack looks like** — it learns only what
+*normal* looks like, then flags anything that does not fit (one-class / unsupervised
+anomaly detection). It is two small pieces, not a monolith:
+
+| Stage | Code | What happens |
+|---|---|---|
+| Train | `tools/train_detector.py` | `StandardScaler` learns the mean/spread of normal, then `IsolationForest(200 trees, contamination 0.02)` learns the *shape/density* of normal. Saved as `models/detector.joblib` = `{model, scaler, features}`. |
+| Score | `tools/dashboard.py::score_sample()` | Each live sample → same scaler → `decision_function` (continuous, + = normal, − = anomaly) + `predict` (+1 normal / −1 attack badge). |
+
+**The trick (Isolation Forest):** build 200 trees, each repeatedly splitting on a
+*random feature* at a *random value* until every point is isolated. Anomalies sit
+in sparse regions, so they isolate in **few** splits (short path); normal points
+are buried in a dense crowd and take **many** splits. Short average path length =
+anomalous. `contamination=0.02` sets the +1/−1 threshold (≈2% training FPR). The
+same `scaler` + `features` travel inside the `.joblib` from train to score, so a
+live sample is judged against normal on identical footing.
+
+### 7.2 Two feature sources
+
+The detector is fed by **two independent vantages** of the same link:
+
+```
+  A. MAC counters   telnet → GN630v → iwpriv rai1 stat   (the §7 pipeline)
+     throughput, retry_rate, tx/rx_per, rssi0..3, tx_mcs, tx_nss
+     → sees the AFTERMATH (throughput drop, PER spike)
+
+  B. BFI / CSI      Alfa in MONITOR mode → sniffs the air (OFF-AIR)
+     the victim's HE Compressed Beamforming Report, decoded to Givens angles
+     → sees the FORGERY ITSELF (the exact frame BeamCraft manipulates)
+```
+
+**BFI/CSI pipeline (`tools/bfi_features.py`):** decodes captured HE compressed
+beamforming reports (φ/ψ Givens angles, ported and V-unitarity-validated from
+`main_su.cpp`) into per-frame CSI-style features:
+
+| Feature | Meaning |
+|---|---|
+| `bfi_phi_mean`, `bfi_psi_mean` | phase / amplitude geometry of the steering matrix |
+| `bfi_angle_var` | CSI-matrix variance |
+| `bfi_subcarrier_var` | variance across subcarriers = multipath / frequency selectivity |
+| `bfi_phi/psi_temporal_var` | frame-to-frame channel stability (rolling window) |
+
+Because BFI is captured **off-air**, these CSI features work on the **current 2×2
+rig today** — decoupling the normal-side dataset from the 4×4 hardware blocker.
+Attack-side CSI needs the 4×4 AP, or the synthetic generator
+(`tools/make_synthetic_bfi_attack.py`, 98.8% detection / 2.3% FP) for pipeline
+validation in the meantime. *(Raw per-subcarrier CSI would need PicoScenes + an
+AX210 + Ubuntu — see Future Work.)*
+
 ---
 
 ## 8. Tools
@@ -249,25 +300,82 @@ flags whatever "isolates" too easily — catching an attack it never trained on.
 | Tool | What it does |
 |---|---|
 | `tools/gn630v_telemetry.py` | telnet → `iwpriv rai1 stat` every 2 s → CSV (RSSI/MCS/throughput/retry), labelled `normal`/`attack`. Backed by `gn630v_telnet.py` (stdlib raw-socket telnet). |
-| `tools/dashboard.py` + `dashboard.html` | **live** telemetry web dashboard (Starlette + WebSocket + Chart.js). `--mode live` polls the router; `--mode replay` streams a CSV (demo-safe, no router). Run via `.venv/bin/python`. See `docs/dashboard.md`. |
+| `tools/dashboard.py` + `dashboard.html` | **live** telemetry web dashboard **+ Command Center** (Starlette + WebSocket + Chart.js). `--mode live` polls the router; `--mode replay` streams a CSV (demo-safe, no router); `--bfi-iface` folds live off-air CSI features in. Hosts the button-driven task runner (see §9). Run via `.venv/bin/python`. See `docs/dashboard.md`. |
+| `tools/tasks.py` | Command Center task registry — the single source of truth for the CLI tasks the dashboard can run (predefined only; no arbitrary shell). |
+| `tools/bfi_features.py` | decode captured HE compressed beamforming reports → per-frame CSI features CSV (`--pcap`/`--out`); also `stream_features()` for live off-air decode. V-unitarity validated. |
+| `tools/make_synthetic_bfi_attack.py` | perturb real normal BFI → labelled synthetic *attack* CSI features for detector validation (`--severity`). 98.8% detection / 2.3% FP. |
 | `tools/bfi_capture.py` | capture/inspect VHT/HE beamforming action frames (tshark) → decode `Nc/Nr/width` and compare vs assumptions. *(live mode note: capture raw with `tshark -w`, analyse with `pcap` mode.)* |
 | `tools/attack_harness.py` | iperf3 baseline-vs-attack downlink throughput → drop % + ≥51% success gate → JSON. |
-| `tools/attack_gui.py` | Tkinter panel: scan NIC, monitor mode, patch+compile+run `main_su` via one `pkexec`. |
+| `tools/attack_gui.py` | Tkinter panel (legacy; superseded by the Command Center): scan NIC, monitor mode, patch+compile+run `main_su` via one `pkexec`. |
 | `BeamCraft_AE/main_su.cpp` | BeamCraft SU attack (configurable: `--iface/--ap/--victim/--alpha/--type/--offset`, `NR/NC/NST` defines). |
 
 ---
 
-## 9. Datasets
+## 9. Command Center (Mission Control) — how to use
+
+The dashboard doubles as a **Command Center**: a browser panel that runs the
+project's CLI tools via buttons and streams their live output into a read-only
+console — so you drive captures, training, and the attack without leaving the page.
+
+**Start it** (localhost only — the task runner refuses non-loopback requests):
+
+```bash
+.venv/bin/python tools/dashboard.py --mode live          # live telemetry + Command Center
+# or, demo-safe with no router:
+.venv/bin/python tools/dashboard.py --mode replay --csv data/synthetic_attack.csv
+# add live off-air CSI features:
+.venv/bin/python tools/dashboard.py --mode live --bfi-iface mon0
+```
+Open **http://localhost:8080**.
+
+**Layout:**
+
+```
+  ┌── BEAM // WARDEN — Command Center ─────────────────────────────┐
+  │  shared params: [mon iface] [gn630v host] [channel] [duration]  │
+  │  [Setup Monitor] [Scan Adapters] [Capture BFI] [Start Attack]   │  ← task buttons
+  │  [Train Detector] [Gen Synthetic] [Decode Features] [Stop]      │
+  │  status chips:  ●running / ✓done / ✗failed   per task           │
+  │  ┌── LIVE CONSOLE (read-only, stdout+stderr) ────────────────┐  │
+  │  │ $ tshark -i mon0 -w results/sessions/<run>_air.pcap        │  │
+  │  │ 171 HE frames captured …                                   │  │
+  │  └────────────────────────────────────────────────────────────┘ │
+  │  ── telemetry tiles · charts · ML anomaly · CSI panel · replay ── │
+  └────────────────────────────────────────────────────────────────┘
+```
+
+**Tasks** (defined in `tools/tasks.py`): `setup_monitor`, `scan_adapters`,
+`capture_bfi`, `start_attack`, `train_detector`, `gen_synthetic`,
+`decode_features`. Fill the shared params at the top; each button resolves them
+into the underlying CLI command and streams the result to the console. Privileged
+tasks (monitor mode, capture, attack) run via `pkexec`; **Stop** kills a running
+task (root-kill for privileged ones).
+
+**How it works:** `POST /run/{name}` spawns the task as a subprocess and streams
+`{type:"log"}` lines over the existing WebSocket; `{type:"status"}` drives the
+chips. `GET /tasks` returns the registry. It is a **predefined registry only** —
+no arbitrary shell — and every endpoint rejects non-loopback callers.
+
+**Concurrent capture:** because the Alfa runs monitor mode and the GN630v is
+polled over telnet (different NICs), you can **Capture BFI** while live telemetry
+streams — just keep the GN630v reachable over ethernet/the Intel NIC (the Alfa is
+busy in monitor mode).
+
+---
+
+## 10. Datasets
 
 | File | Class | Conditions |
 |---|---|---|
 | `data/normal_iperf.csv` | **normal** | legit traffic + live iperf3 load, **no attack** (~98 Mbps, PER ~15%, retry ~0.13, MCS 3–4, HE_SU BW80) |
 | `data/bfi_he_capture.pcap` | — | 171 live HE beamforming reports (Gate-2 evidence) |
-| _(next)_ `data/attack_*.csv` | **attack** | same link while forged BFI is injected |
+| `data/bfi_features.csv` | **normal** | 171 rows of CSI features decoded from the BFI capture (`bfi_features.py`) |
+| `data/bfi_synthetic_attack.csv` | normal + **attack** | 171 real-normal + 171 synthetic-attack CSI rows, labelled (`make_synthetic_bfi_attack.py`); 98.8% detectable |
+| _(next)_ `data/attack_*.csv` | **attack** | same link while forged BFI is injected (needs the 4×4 AP) |
 
 ---
 
-## 10. Hardware & stack
+## 11. Hardware & stack
 
 | Role | Device / tech |
 |---|---|
@@ -279,9 +387,9 @@ flags whatever "isolates" too easily — catching an attack it never trained on.
 
 ---
 
-## 11. Repo layout
+## 12. Repo layout
 
-- `docs/` — progress report, challenges log, Gate-2 findings, dashboard guide, hardware recon.
+- `docs/` — progress report, challenges logs (`challenges.md`, `challenges-2026-09-17.md`), Gate-2 findings, dashboard guide, ML-engine notes, hardware recon.
 - `tools/` — our scripts (tracked).
 - `data/` — datasets + captures.
 - `BeamCraft_AE/`, `BFM-tool/` — external reference repos (gitignored). `BeamCraft_AE` = the VHT attack; `BFM-tool` = raw BFI capture.
