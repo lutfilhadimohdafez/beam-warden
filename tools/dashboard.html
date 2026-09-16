@@ -1340,8 +1340,16 @@
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <div class="mc-param" style="margin:0;">
-            <label>Target samples (N)</label>
-            <input id="learnCalibTargetN" type="number" value="150" min="30" max="100000" step="1" style="width:90px;">
+            <label>Capture Duration (hours)</label>
+            <input id="learnCalibTargetN" type="number" value="1" min="0.02" max="48" step="0.25" style="width:90px;">
+            <span id="learnCalibEstimate" style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);margin-top:2px;"></span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:flex-end;">
+            <button class="mc-btn" data-calib-hours="0.25" style="padding:6px 8px;font-size:0.56rem;">15m</button>
+            <button class="mc-btn" data-calib-hours="1" style="padding:6px 8px;font-size:0.56rem;">1h</button>
+            <button class="mc-btn" data-calib-hours="4" style="padding:6px 8px;font-size:0.56rem;">4h</button>
+            <button class="mc-btn" data-calib-hours="8" style="padding:6px 8px;font-size:0.56rem;">8h</button>
+            <button class="mc-btn" data-calib-hours="24" style="padding:6px 8px;font-size:0.56rem;">24h</button>
           </div>
           <button class="mc-btn run" id="learnCaptureBtn">Capture Current</button>
           <button class="mc-btn" id="learnAutoBtn">Auto-capture: OFF</button>
@@ -2124,6 +2132,7 @@
   var learnCalibCount = 0;
   var learnCalibTarget = 150;
   var learnCalibMin = 30;
+  var learnInterval = 2.0;
 
   var $learnModelLoaded   = document.getElementById("learnModelLoaded");
   var $learnFeatures      = document.getElementById("learnFeatures");
@@ -2143,19 +2152,23 @@
   var $learnAnomalyRate   = document.getElementById("learnAnomalyRate");
   var $learnAnomalyWindow = document.getElementById("learnAnomalyWindow");
   var $learnCalibTargetN  = document.getElementById("learnCalibTargetN");
+  var $learnCalibEstimate = document.getElementById("learnCalibEstimate");
   var $learnHistoryList   = document.getElementById("learnHistoryList");
 
   function learnFetchStatus() {
     fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
       $learnModelLoaded.textContent = d.model_loaded ? "YES" : "NO";
       $learnModelLoaded.style.color = d.model_loaded ? "var(--ok)" : "var(--danger)";
-      $learnFeatures.textContent = d.features.join(", ") || "—";
-      $learnSamples.textContent = d.n_samples || "—";
-      $learnContamination.textContent = d.contamination !== null ? d.contamination : "—";
+      $learnFeatures.textContent = d.features.join(", ") || "\u2014";
+      $learnSamples.textContent = d.n_samples || "\u2014";
+      $learnContamination.textContent = d.contamination !== null ? d.contamination : "\u2014";
       learnCalibCount = d.calib_count || 0;
       learnCalibTarget = d.calib_target || 150;
       learnAutoCapture = d.auto_capture || false;
-      $learnCalibTargetN.value = learnCalibTarget;
+      learnInterval = d.interval || 2.0;
+      var hours = learnCalibTarget * learnInterval / 3600;
+      $learnCalibTargetN.value = parseFloat(hours.toFixed(4));
+      learnUpdateEstimate();
       learnUpdateCalibUI();
       learnUpdateMatch(d.match_rate, d.anomaly_rate);
       learnRenderProfile(d.normal_profile);
@@ -2206,8 +2219,16 @@
     learnUpdateCalibUI();
   }
 
+  function learnUpdateEstimate() {
+    var hours = parseFloat($learnCalibTargetN.value) || 0;
+    var est = Math.round(hours * 3600 / learnInterval);
+    $learnCalibEstimate.textContent = "\u2248 " + est.toLocaleString() + " samples (@" + learnInterval.toFixed(1) + "s each)";
+  }
+
   function learnUpdateCalibUI() {
-    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget + " normal samples (~2s each)";
+    var hrs = learnCalibTarget * learnInterval / 3600;
+    var hrsFmt = hrs >= 1 ? hrs.toFixed(1) + "h" : (hrs * 60).toFixed(0) + "m";
+    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget + " samples (~" + learnInterval.toFixed(1) + "s each, \u2248" + hrsFmt + ")";
     var pct = learnCalibTarget > 0 ? (learnCalibCount / learnCalibTarget) * 100 : 0;
     $learnCalibBar.style.width = Math.min(pct, 100) + "%";
     $learnCalibBar.style.background = learnCalibCount >= learnCalibTarget ? "var(--ok)" : "var(--accent)";
@@ -2307,21 +2328,45 @@
       .catch(function () {});
   });
 
-  /* ---- Target N sync ---- */
+  /* ---- Target duration (hours) sync ---- */
   $learnCalibTargetN.addEventListener("change", function () {
-    var n = parseInt($learnCalibTargetN.value, 10);
-    if (isNaN(n) || n < 30) { n = 30; $learnCalibTargetN.value = 30; }
-    if (n > 100000) { n = 100000; $learnCalibTargetN.value = 100000; }
+    var hours = parseFloat($learnCalibTargetN.value);
+    if (isNaN(hours) || hours < 0.02) { hours = 0.02; $learnCalibTargetN.value = 0.02; }
+    if (hours > 48) { hours = 48; $learnCalibTargetN.value = 48; }
+    learnUpdateEstimate();
     fetch("/calibrate/target", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ n: n }),
+      body: JSON.stringify({ hours: hours }),
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d.ok) {
         learnCalibTarget = d.target;
+        learnInterval = d.interval || learnInterval;
+        learnUpdateEstimate();
         learnUpdateCalibUI();
       }
     }).catch(function () {});
+  });
+
+  /* ---- Quick-pick duration buttons ---- */
+  document.querySelectorAll("[data-calib-hours]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var hours = parseFloat(btn.getAttribute("data-calib-hours"));
+      $learnCalibTargetN.value = hours;
+      learnUpdateEstimate();
+      fetch("/calibrate/target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hours: hours }),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.ok) {
+          learnCalibTarget = d.target;
+          learnInterval = d.interval || learnInterval;
+          learnUpdateEstimate();
+          learnUpdateCalibUI();
+        }
+      }).catch(function () {});
+    });
   });
 
   /* ---- Training history ---- */

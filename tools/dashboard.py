@@ -758,6 +758,7 @@ async def _model_status(request: Request) -> JSONResponse:
         "calib_count": len(CALIB_BUFFER),
         "calib_target": _calib_target,
         "auto_capture": _AUTO_CAPTURE,
+        "interval": args.interval,
     })
 
 
@@ -868,7 +869,7 @@ async def _calibrate_auto(request: Request) -> JSONResponse:
 
 
 async def _calibrate_target(request: Request) -> JSONResponse:
-    """POST /calibrate/target — set calibration target N for this run."""
+    """POST /calibrate/target — set calibration target (hours or raw N)."""
     global _calib_target
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
@@ -876,11 +877,22 @@ async def _calibrate_target(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
+    hours = body.get("hours")
     n = body.get("n")
-    if not isinstance(n, (int, float)) or int(n) < _CALIB_MIN:
-        return JSONResponse({"error": f"n must be integer >= {_CALIB_MIN}"}, status_code=400)
-    _calib_target = int(n)
-    return JSONResponse({"ok": True, "target": _calib_target})
+    if hours is not None:
+        try:
+            hours = float(hours)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "hours must be a number"}, status_code=400)
+        n_computed = max(_CALIB_MIN, round(hours * 3600 / args.interval))
+        _calib_target = n_computed
+    elif n is not None:
+        if not isinstance(n, (int, float)) or int(n) < _CALIB_MIN:
+            return JSONResponse({"error": f"n must be integer >= {_CALIB_MIN}"}, status_code=400)
+        _calib_target = int(n)
+    else:
+        return JSONResponse({"error": "provide hours or n"}, status_code=400)
+    return JSONResponse({"ok": True, "target": _calib_target, "interval": args.interval})
 
 
 async def _training_history(request: Request) -> JSONResponse:
