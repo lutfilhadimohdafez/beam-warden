@@ -12,12 +12,10 @@
     --panel-2: #171b25;
     --border: #242a38;
     --accent: #fb8d24;
-    --accent-2: #f5620a;
     --text: #eef1f6;
     --muted: #808a9e;
     --ok: #35d07f;
     --danger: #ff4b4b;
-    --grid: #1e2430;
     --font-display: 'Oswald', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
   }
@@ -32,9 +30,9 @@
     line-height: 1.5;
     min-height: 100vh;
     position: relative;
+    overflow-x: hidden;
   }
 
-  /* Grain overlay */
   body::before {
     content: '';
     position: fixed;
@@ -47,7 +45,6 @@
     background-size: 200px;
   }
 
-  /* Wave background */
   .wave-bg {
     position: fixed;
     inset: 0;
@@ -66,14 +63,13 @@
   }
 
   .container {
-    max-width: 960px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 0 20px 60px;
     position: relative;
     z-index: 1;
   }
 
-  /* ---- HEADER ---- */
   .header {
     display: flex;
     align-items: center;
@@ -101,11 +97,6 @@
     text-transform: uppercase;
     color: var(--muted);
   }
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
   .nav-link {
     font-family: var(--font-display);
     font-size: 0.8rem;
@@ -118,7 +109,6 @@
   }
   .nav-link:hover { color: var(--accent); }
 
-  /* ---- SECTION ---- */
   .section { margin-bottom: 36px; }
   .section-head {
     font-family: var(--font-display);
@@ -150,7 +140,6 @@
     margin-bottom: 16px;
   }
 
-  /* ---- PANEL ---- */
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -158,9 +147,7 @@
     padding: 20px 22px;
     margin-bottom: 16px;
   }
-  .panel-accent-top { border-top: 2px solid var(--border); }
 
-  /* ---- BODY TEXT ---- */
   .body-text {
     font-family: var(--font-display);
     font-size: 0.88rem;
@@ -180,44 +167,6 @@
     color: var(--accent);
   }
 
-  /* ---- TABLE ---- */
-  .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.78rem; }
-  .data-table thead th {
-    font-family: var(--font-display);
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    text-align: left;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    background: var(--panel-2);
-  }
-  .data-table tbody td {
-    padding: 7px 10px;
-    border-bottom: 1px solid rgba(36,42,56,0.5);
-    color: var(--text);
-    vertical-align: top;
-  }
-  .data-table tbody tr:last-child td { border-bottom: none; }
-  .data-table .feat-name { color: var(--accent); font-weight: 500; white-space: nowrap; }
-  .data-table .feat-behavior { color: var(--muted); }
-
-  /* ---- PIPELINE ---- */
-  .pipeline {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    line-height: 1.6;
-    color: var(--muted);
-    white-space: pre;
-    overflow-x: auto;
-    padding: 16px 0;
-  }
-  .pipeline .hl { color: var(--accent); font-weight: 500; }
-  .pipeline .dim { color: #4a5168; }
-
-  /* ---- STAT ROWS ---- */
   .stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -253,11 +202,229 @@
     color: var(--muted);
     margin-top: 3px;
   }
+
+  /* ── Pipeline ── */
+  .pipeline-wrap {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pipeline-track {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    position: relative;
+  }
+
+  .pipe-stage {
+    flex: 1;
+    min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 14px 12px 12px;
+    position: relative;
+    transition: border-color 0.3s;
+  }
+  .pipe-stage.active { border-color: var(--accent); }
+  .pipe-stage + .pipe-stage { border-left: none; }
+
+  .pipe-stage-num {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .pipe-stage-title {
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .pipe-stage-body {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    line-height: 1.6;
+    min-height: 80px;
+  }
+  .pipe-stage-body .val { color: var(--text); }
+  .pipe-stage-body .formula { color: var(--accent); font-size: 0.62rem; }
+  .pipe-stage-body .verdict-ok { color: var(--ok); font-weight: 700; }
+  .pipe-stage-body .verdict-bad { color: var(--danger); font-weight: 700; }
+
+  /* Arrow connectors */
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-width: 28px;
+    color: var(--muted);
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+
+  /* Animated sample token */
+  .sample-token {
+    position: absolute;
+    top: -6px;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 0;
+    z-index: 10;
+    transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 8px rgba(251,141,36,0.5);
+    pointer-events: none;
+  }
+
+  /* Waiting overlay */
+  .waiting-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Feature table in Stage 2 ── */
+  .feat-mini {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+  }
+  .feat-mini .fn { color: var(--accent); text-align: right; }
+  .feat-mini .fv { color: var(--text); text-align: left; }
+
+  /* ── Scale table ── */
+  .scale-row {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    margin-bottom: 1px;
+  }
+  .scale-row .feat { color: var(--accent); width: 48px; text-align: right; flex-shrink: 0; }
+  .scale-row .raw { color: var(--muted); width: 52px; text-align: right; flex-shrink: 0; }
+  .scale-row .arrow { color: var(--muted); flex-shrink: 0; }
+  .scale-row .z { color: var(--text); width: 52px; text-align: left; flex-shrink: 0; }
+
+  /* ── Tree viz ── */
+  .tree-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .tree-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 10px;
+    overflow: hidden;
+  }
+  .tree-card-title {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .tree-card svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .tree-legend {
+    display: flex;
+    gap: 20px;
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--muted);
+  }
+  .tree-legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .tree-legend .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 0;
+    flex-shrink: 0;
+  }
+
+  .score-box {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 10px 14px;
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text);
+  }
+  .score-box .label { color: var(--muted); }
+  .score-box .formula { color: var(--accent); font-size: 0.62rem; }
+
+  /* Data table */
+  .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.78rem; }
+  .data-table thead th {
+    font-family: var(--font-display);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .data-table tbody td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(36,42,56,0.5);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  .data-table .feat-name { color: var(--accent); font-weight: 500; white-space: nowrap; }
+  .data-table .feat-behavior { color: var(--muted); }
+
+  /* Responsive */
+  @media (max-width: 800px) {
+    .pipeline-track { flex-direction: column; }
+    .pipe-arrow { transform: rotate(90deg); width: auto; min-width: auto; height: 24px; }
+    .pipe-stage + .pipe-stage { border-left: 1px solid var(--border); border-top: none; }
+    .tree-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 500px) {
+    .tree-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 
-<!-- WAVE BACKGROUND -->
 <div class="wave-bg">
   <svg viewBox="0 0 2400 320" preserveAspectRatio="none">
     <path class="wave-1" fill="#fb8d24" d="M0,160 C200,100 400,220 600,160 C800,100 1000,220 1200,160 C1400,100 1600,220 1800,160 C2000,100 2200,220 2400,160 L2400,320 L0,320 Z"/>
@@ -267,8 +434,6 @@
 </div>
 
 <div class="container">
-
-  <!-- HEADER -->
   <div class="header">
     <div class="header-left">
       <div class="wordmark">BEAM <span class="sep">//</span> <span class="warden">WARDEN</span></div>
@@ -279,50 +444,95 @@
     </div>
   </div>
 
+  <!-- LIVE PIPELINE -->
+  <div class="section">
+    <div class="section-head">Live Processing Pipeline</div>
+    <div class="section-sub">Real-time sample flow: raw telemetry &rarr; extraction &rarr; scaling &rarr; isolation forest &rarr; verdict</div>
+    <div class="panel pipeline-wrap">
+      <div class="sample-token" id="sampleToken"></div>
+      <div class="pipeline-track">
+        <!-- Stage 1: Raw -->
+        <div class="pipe-stage" id="stage1">
+          <div class="pipe-stage-num">Stage 1</div>
+          <div class="pipe-stage-title">Raw</div>
+          <div class="pipe-stage-body" id="stage1Body">
+            <div class="waiting-overlay">Waiting for samples&hellip;</div>
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <!-- Stage 2: Extract -->
+        <div class="pipe-stage" id="stage2">
+          <div class="pipe-stage-num">Stage 2</div>
+          <div class="pipe-stage-title">Extract</div>
+          <div class="pipe-stage-body" id="stage2Body">
+            <div class="waiting-overlay">Feature vector</div>
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <!-- Stage 3: Scale -->
+        <div class="pipe-stage" id="stage3">
+          <div class="pipe-stage-num">Stage 3</div>
+          <div class="pipe-stage-title">Scale</div>
+          <div class="pipe-stage-body" id="stage3Body">
+            <div class="formula">z = (x &minus; &mu;) / &sigma;</div>
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <!-- Stage 4: Forest -->
+        <div class="pipe-stage" id="stage4">
+          <div class="pipe-stage-num">Stage 4</div>
+          <div class="pipe-stage-title">Forest</div>
+          <div class="pipe-stage-body" id="stage4Body">
+            <div class="waiting-overlay">Isolation trees</div>
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <!-- Stage 5: Score -->
+        <div class="pipe-stage" id="stage5">
+          <div class="pipe-stage-num">Stage 5</div>
+          <div class="pipe-stage-title">Score</div>
+          <div class="pipe-stage-body" id="stage5Body">
+            <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TREE VISUALIZATION -->
+  <div class="section">
+    <div class="section-head">Isolation Forest Trees</div>
+    <div class="section-sub">Where the current sample lands in the first 4 trees</div>
+    <div class="panel">
+      <div class="tree-grid" id="treeGrid">
+        <div class="waiting-overlay">Loading forest structure&hellip;</div>
+      </div>
+      <div class="tree-legend">
+        <span><div class="swatch" style="background:var(--ok)"></div> Long path = normal</span>
+        <span><div class="swatch" style="background:var(--danger)"></div> Short path = anomaly</span>
+        <span><div class="swatch" style="background:var(--accent)"></div> Current sample</span>
+      </div>
+      <div class="score-box" id="scoreSummary" style="display:none">
+        <div><span class="label">Average path length E(h):</span> <span id="avgPath">—</span></div>
+        <div><span class="label">c(n) = 2H(n&minus;1) &minus; 2(n&minus;1)/n:</span> <span id="cnVal">—</span></div>
+        <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
+        <div><span class="label">Anomaly score:</span> <span id="finalScore">—</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- WHY ISOLATION FOREST -->
   <div class="section">
     <div class="section-head">Why Isolation Forest</div>
     <div class="section-sub">Unsupervised anomaly detection for WiFi telemetry</div>
-    <div class="panel panel-accent-top">
+    <div class="panel">
       <p class="body-text">
-        <strong>Isolation Forest</strong> is an unsupervised algorithm that isolates anomalies by random partitioning.
-        Unlike supervised classifiers, it trains on <strong>normal traffic only</strong> &mdash; no labelled attack data required.
+        <strong>Isolation Forest</strong> isolates anomalies by random partitioning.
         Anomalies are isolated in fewer splits because they are rare and distinct, yielding a short average path length.
+        The score formula: <code>s = 2^(-E(h)/c(n))</code> where <code>E(h)</code> is the mean path length across all trees
+        and <code>c(n) = 2H(n-1) - 2(n-1)/n</code> is the average path length of unsuccessful search in BST.
+        Score &gt; 0.5 = normal, &lt; 0.5 = anomaly.
       </p>
-      <br>
-      <p class="body-text">
-        The short-path intuition: a point that is easy to isolate (few splits) is likely anomalous.
-        The <code>decision_function</code> returns a score where <strong>&gt;0 = normal</strong>, <strong>&lt;0 = anomaly</strong>.
-        This makes it effective for catching <strong>previously unseen attack patterns</strong> without retraining.
-      </p>
-    </div>
-  </div>
-
-  <!-- PARAMETERS -->
-  <div class="section">
-    <div class="section-head">Model Parameters</div>
-    <div class="section-sub">Training configuration</div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-card-label">Estimators</div>
-        <div class="stat-card-value">200</div>
-        <div class="stat-card-note">Number of isolation trees</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Contamination</div>
-        <div class="stat-card-value">0.02</div>
-        <div class="stat-card-note">Expected anomaly ratio in training set</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Scaler</div>
-        <div class="stat-card-value">StandardScaler</div>
-        <div class="stat-card-note">Zero-mean, unit-variance normalisation</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Features</div>
-        <div class="stat-card-value">11</div>
-        <div class="stat-card-note">WiFi telemetry variables</div>
-      </div>
     </div>
   </div>
 
@@ -333,160 +543,400 @@
     <div class="panel">
       <table class="data-table">
         <thead>
-          <tr>
-            <th>#</th>
-            <th>Feature</th>
-            <th>Normal</th>
-            <th>Under Attack</th>
-          </tr>
+          <tr><th>#</th><th>Feature</th><th>Normal</th><th>Under Attack</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td>1</td>
-            <td class="feat-name">throughput_tx_mbps</td>
-            <td class="feat-behavior">Stable, link-rate dependent</td>
-            <td class="feat-behavior">Collapses &mdash; channel saturated</td>
-          </tr>
-          <tr>
-            <td>2</td>
-            <td class="feat-name">throughput_rx_mbps</td>
-            <td class="feat-behavior">Stable</td>
-            <td class="feat-behavior">Collapses &mdash; AP overwhelmed</td>
-          </tr>
-          <tr>
-            <td>3</td>
-            <td class="feat-name">retry_rate</td>
-            <td class="feat-behavior">Low, near zero</td>
-            <td class="feat-behavior">Spikes &mdash; frame collisions increase</td>
-          </tr>
-          <tr>
-            <td>4</td>
-            <td class="feat-name">tx_per_pct</td>
-            <td class="feat-behavior">Low &lt;5%</td>
-            <td class="feat-behavior">Spikes &mdash; corrupted frames</td>
-          </tr>
-          <tr>
-            <td>5</td>
-            <td class="feat-name">rx_per_pct</td>
-            <td class="feat-behavior">Low &lt;5%</td>
-            <td class="feat-behavior">Spikes &mdash; interference/jamming</td>
-          </tr>
-          <tr>
-            <td>6</td>
-            <td class="feat-name">rssi0</td>
-            <td class="feat-behavior">Stable per location</td>
-            <td class="feat-behavior">Shifts &mdash; jammer injection</td>
-          </tr>
-          <tr>
-            <td>7</td>
-            <td class="feat-name">rssi1</td>
-            <td class="feat-behavior">Stable</td>
-            <td class="feat-behavior">Shifts</td>
-          </tr>
-          <tr>
-            <td>8</td>
-            <td class="feat-name">rssi2</td>
-            <td class="feat-behavior">Stable</td>
-            <td class="feat-behavior">Shifts</td>
-          </tr>
-          <tr>
-            <td>9</td>
-            <td class="feat-name">rssi3</td>
-            <td class="feat-behavior">Stable</td>
-            <td class="feat-behavior">Shifts</td>
-          </tr>
-          <tr>
-            <td>10</td>
-            <td class="feat-name">tx_mcs</td>
-            <td class="feat-behavior">High (7&ndash;11)</td>
-            <td class="feat-behavior">Drops &mdash; rate adaptation fallback</td>
-          </tr>
-          <tr>
-            <td>11</td>
-            <td class="feat-name">tx_nss</td>
-            <td class="feat-behavior">Max spatial streams</td>
-            <td class="feat-behavior">May drop &mdash; link degradation</td>
-          </tr>
+          <tr><td>1</td><td class="feat-name">throughput_tx_mbps</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Collapses</td></tr>
+          <tr><td>2</td><td class="feat-name">throughput_rx_mbps</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Collapses</td></tr>
+          <tr><td>3</td><td class="feat-name">retry_rate</td><td class="feat-behavior">Low, near zero</td><td class="feat-behavior">Spikes</td></tr>
+          <tr><td>4</td><td class="feat-name">tx_per_pct</td><td class="feat-behavior">Low &lt;5%</td><td class="feat-behavior">Spikes</td></tr>
+          <tr><td>5</td><td class="feat-name">rx_per_pct</td><td class="feat-behavior">Low &lt;5%</td><td class="feat-behavior">Spikes</td></tr>
+          <tr><td>6</td><td class="feat-name">rssi0</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
+          <tr><td>7</td><td class="feat-name">rssi1</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
+          <tr><td>8</td><td class="feat-name">rssi2</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
+          <tr><td>9</td><td class="feat-name">rssi3</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
+          <tr><td>10</td><td class="feat-name">tx_mcs</td><td class="feat-behavior">High (7-11)</td><td class="feat-behavior">Drops</td></tr>
+          <tr><td>11</td><td class="feat-name">tx_nss</td><td class="feat-behavior">Max streams</td><td class="feat-behavior">May drop</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- PIPELINE -->
-  <div class="section">
-    <div class="section-head">Pipeline</div>
-    <div class="section-sub">Data flow from raw telemetry to dashboard alert</div>
-    <div class="panel panel-accent-top">
-      <div class="pipeline"><span class="hl">WiFi Telemetry</span>   (iw / hostapd / nl80211)
-       │
-       ▼
-<span class="hl">11 Raw Features</span>   extracted per sample
-       │
-       ▼
-<span class="hl">StandardScaler</span>    z-score normalisation
-       │               (zero mean, unit variance)
-       ▼
-<span class="hl">IsolationForest</span>   200 trees, contamination=0.02
-       │               decision_function(x) → score
-       ▼
-<span class="hl">Score</span>             &gt; 0  →  <span class="dim">NORMAL</span>
-       │               &lt; 0  →  <span class="hl">ANOMALY</span>
-       ▼
-<span class="hl">predict()</span>         1 = normal, -1 = anomaly
-       │
-       ▼
-<span class="hl">Dashboard Alert</span>   WebSocket push → UI update</div>
-    </div>
-  </div>
-
-  <!-- STATUS -->
-  <div class="section">
-    <div class="section-head">Status</div>
-    <div class="section-sub">Current detection performance</div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-card-label">Normal Traffic</div>
-        <div class="stat-card-value ok">~2%</div>
-        <div class="stat-card-note">Flagged (false-positive floor)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Synthetic Attack</div>
-        <div class="stat-card-value ok">100%</div>
-        <div class="stat-card-note">Flagged (scripted injection)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Real Attack Target</div>
-        <div class="stat-card-value">&ge;55%</div>
-        <div class="stat-card-note">Requires real attack telemetry data</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Detection Mode</div>
-        <div class="stat-card-value">Unsupervised</div>
-        <div class="stat-card-note">Trains on normal traffic only</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- NOTES -->
-  <div class="section">
-    <div class="section-head">Notes</div>
-    <div class="panel">
-      <p class="body-text">
-        The model is trained offline on collected normal-mode telemetry. The <code>StandardScaler</code> is fitted
-        on the same training set and serialised alongside the forest. At inference time, each incoming sample is
-        scaled and scored; the raw <code>decision_function</code> value is pushed over the WebSocket as
-        <code>anomaly_score</code> and the binary verdict as <code>is_anomaly</code>.
-      </p>
-      <br>
-      <p class="body-text">
-        Synthetic attack replay (deauth/CSMA flooding) achieves 100% detection because the injected traffic is
-        statistically extreme. Real-world accuracy (&ge;55% target) depends on capturing genuine attack telemetry
-        &mdash; the model's <code>contamination=0.02</code> threshold is calibrated for a low false-positive rate
-        on normal WiFi environments.
-      </p>
-    </div>
-  </div>
-
 </div>
+
+<script>
+(function() {
+  "use strict";
+
+  // ── State ──
+  let forestData = null;
+  let ws = null;
+  let latestSample = null;
+  let animToken = null;
+  const FEATURE_KEYS = [
+    "throughput_tx_mbps","throughput_rx_mbps","retry_rate",
+    "tx_per_pct","rx_per_pct","rssi0","rssi1","rssi2","rssi3",
+    "tx_mcs","tx_nss"
+  ];
+
+  // ── Fetch forest viz ──
+  async function loadForest() {
+    try {
+      const r = await fetch("/forest-viz");
+      const d = await r.json();
+      if (d.error) return;
+      forestData = d;
+      renderTrees(null);
+    } catch(e) { /* silent */ }
+  }
+
+  // ── Harmonic number H(n) ──
+  function harmonic(n) {
+    let h = 0;
+    for (let i = 1; i < n; i++) h += 1/i;
+    return h;
+  }
+
+  // ── Path length through a tree for a scaled sample ──
+  function pathLength(tree, scaledX) {
+    let node = 0;
+    let depth = 0;
+    const maxDepth = 8;
+    while (depth < maxDepth) {
+      const feat = tree.feature[node];
+      if (feat === -2) break; // leaf
+      const thr = tree.threshold[node];
+      if (scaledX[feat] <= thr) {
+        node = tree.children_left[node];
+      } else {
+        node = tree.children_right[node];
+      }
+      depth++;
+      // check if new node is leaf
+      if (tree.children_left[node] === -1 && tree.children_right[node] === -1) break;
+    }
+    return { depth, leafNode: node };
+  }
+
+  // ── Render SVG tree (shallow, max depth 6) ──
+  function renderTreeSVG(tree, treeIdx, pathNodes, pathDepth, isAnomaly) {
+    const maxDrawDepth = 6;
+    const nodeR = 10;
+    const levelH = 44;
+    const svgW = 220;
+    const svgH = maxDrawDepth * levelH + 30;
+
+    // BFS to collect nodes up to maxDrawDepth
+    const nodes = []; // {id, depth, x, y, feat, thr, isLeaf, parent, side}
+    const queue = [{id: 0, depth: 0, parent: -1, side: 'none'}];
+    while (queue.length) {
+      const n = queue.shift();
+      if (n.depth > maxDrawDepth) continue;
+      const feat = tree.feature[n.id];
+      const isLeaf = (feat === -2) || (tree.children_left[n.id] === -1);
+      nodes.push({...n, feat, thr: tree.threshold[n.id], isLeaf});
+      if (!isLeaf && n.depth < maxDrawDepth) {
+        queue.push({id: tree.children_left[n.id], depth: n.depth+1, parent: n.id, side: 'L'});
+        queue.push({id: tree.children_right[n.id], depth: n.depth+1, parent: n.id, side: 'R'});
+      }
+    }
+
+    // Assign x positions per level
+    const levels = {};
+    nodes.forEach(n => {
+      if (!levels[n.depth]) levels[n.depth] = [];
+      levels[n.depth].push(n);
+    });
+    Object.keys(levels).forEach(d => {
+      const arr = levels[d];
+      arr.forEach((n, i) => {
+        n.x = (i + 0.5) * (svgW / arr.length);
+        n.y = 20 + parseInt(d) * levelH;
+      });
+    });
+
+    // Build node map for path lookup
+    const nodeMap = {};
+    nodes.forEach(n => nodeMap[n.id] = n);
+
+    // Path set for highlighting
+    const pathSet = new Set(pathNodes || []);
+
+    let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">`;
+
+    // Edges
+    nodes.forEach(n => {
+      if (n.parent >= 0 && nodeMap[n.parent]) {
+        const p = nodeMap[n.parent];
+        const onPath = pathSet.has(n.id) && pathSet.has(n.parent);
+        const stroke = onPath ? (isAnomaly ? '#ff4b4b' : '#35d07f') : '#242a38';
+        const sw = onPath ? 2 : 1;
+        svg += `<line x1="${p.x}" y1="${p.y+nodeR}" x2="${n.x}" y2="${n.y-nodeR}" stroke="${stroke}" stroke-width="${sw}"/>`;
+      }
+    });
+
+    // Nodes
+    nodes.forEach(n => {
+      const onPath = pathSet.has(n.id);
+      const isEnd = n.id === (pathNodes ? pathNodes[pathNodes.length-1] : -1);
+      let fill = '#171b25';
+      let stroke = '#242a38';
+      let textColor = '#808a9e';
+      if (onPath && isEnd) {
+        fill = '#fb8d24';
+        stroke = '#fb8d24';
+        textColor = '#0b0d12';
+      } else if (onPath) {
+        stroke = isAnomaly ? '#ff4b4b' : '#35d07f';
+        fill = isAnomaly ? 'rgba(255,75,75,0.15)' : 'rgba(53,208,127,0.15)';
+        textColor = isAnomaly ? '#ff4b4b' : '#35d07f';
+      }
+      svg += `<rect x="${n.x-nodeR}" y="${n.y-nodeR}" width="${nodeR*2}" height="${nodeR*2}" rx="0" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+      if (n.isLeaf) {
+        svg += `<text x="${n.x}" y="${n.y+4}" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="${textColor}">L</text>`;
+      } else {
+        const fname = forestData && forestData.features[n.feat] ? forestData.features[n.feat].replace('throughput_','tp_').replace('_pct','%') : '?';
+        svg += `<text x="${n.x}" y="${n.y+3}" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="${textColor}">${fname.substring(0,5)}</text>`;
+      }
+    });
+
+    svg += '</svg>';
+    return svg;
+  }
+
+  // ── Compute paths for current sample ──
+  function computePaths(sample) {
+    if (!forestData || !sample) return null;
+    const raw = FEATURE_KEYS.map(k => parseFloat(sample[k]) || 0);
+    const scaled = raw.map((x, i) => (x - forestData.scaler.mean[i]) / forestData.scaler.scale[i]);
+    const paths = [];
+    const depths = [];
+    forestData.trees.forEach((tree, i) => {
+      const result = pathLength(tree, scaled);
+      // Collect full path nodes
+      const pathNodes = [];
+      let node = 0;
+      pathNodes.push(node);
+      for (let d = 0; d < result.depth; d++) {
+        const feat = tree.feature[node];
+        if (feat === -2) break;
+        const thr = tree.threshold[node];
+        node = scaled[feat] <= thr ? tree.children_left[node] : tree.children_right[node];
+        pathNodes.push(node);
+      }
+      paths.push(pathNodes);
+      depths.push(result.depth);
+    });
+    const avgDepth = depths.reduce((a,b) => a+b, 0) / depths.length;
+    return { paths, depths, avgDepth, scaled, raw };
+  }
+
+  // ── Render all trees with current path ──
+  function renderTrees(sample) {
+    const grid = document.getElementById('treeGrid');
+    if (!forestData) {
+      grid.innerHTML = '<div class="waiting-overlay">Loading forest structure&hellip;</div>';
+      return;
+    }
+
+    let pathInfo = null;
+    let isAnomaly = false;
+    if (sample) {
+      pathInfo = computePaths(sample);
+      isAnomaly = sample.is_anomaly || false;
+    }
+
+    let html = '';
+    forestData.trees.forEach((tree, i) => {
+      const pathNodes = pathInfo ? pathInfo.paths[i] : null;
+      const depth = pathInfo ? pathInfo.depths[i] : 0;
+      const svg = renderTreeSVG(tree, i, pathNodes, depth, isAnomaly);
+      html += `<div class="tree-card">
+        <div class="tree-card-title">Tree ${i+1}${pathInfo ? ' — depth ' + depth : ''}</div>
+        ${svg}
+      </div>`;
+    });
+    grid.innerHTML = html;
+
+    // Update score summary
+    const summary = document.getElementById('scoreSummary');
+    if (pathInfo && sample && sample.anomaly_score !== null) {
+      summary.style.display = 'block';
+      const n = forestData.max_samples || 256;
+      const cn = 2 * harmonic(n) - 2 * (n - 1) / n;
+      document.getElementById('avgPath').textContent = pathInfo.avgDepth.toFixed(2);
+      document.getElementById('cnVal').textContent = cn.toFixed(4);
+      const scoreEl = document.getElementById('finalScore');
+      scoreEl.textContent = sample.anomaly_score.toFixed(6);
+      scoreEl.className = sample.is_anomaly ? 'verdict-bad' : 'verdict-ok';
+    } else {
+      summary.style.display = 'none';
+    }
+  }
+
+  // ── Animate pipeline stages ──
+  function animatePipeline(sample) {
+    const token = document.getElementById('sampleToken');
+    const track = document.querySelector('.pipeline-track');
+    const stages = document.querySelectorAll('.pipe-stage');
+    const arrows = document.querySelectorAll('.pipe-arrow');
+
+    // Calculate token position
+    // We want it to move from stage 1 to stage 5
+    // Get bounding rects
+    const trackRect = track.getBoundingClientRect();
+    const stageWidth = stages[0].getBoundingClientRect().width;
+    const arrowWidth = 28;
+
+    // Activate stages sequentially with a delay
+    stages.forEach(s => s.classList.remove('active'));
+
+    let currentStage = 0;
+    function advanceStage() {
+      if (currentStage >= stages.length) return;
+      stages[currentStage].classList.add('active');
+
+      // Move token
+      const stageRect = stages[currentStage].getBoundingClientRect();
+      const offset = stageRect.left - trackRect.left + stageRect.width / 2 - 6;
+      token.style.left = offset + 'px';
+
+      currentStage++;
+      if (currentStage < stages.length) {
+        setTimeout(advanceStage, 200);
+      }
+    }
+
+    // Reset token
+    token.style.transition = 'none';
+    token.style.left = '0px';
+    token.offsetHeight; // force reflow
+    token.style.transition = 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+
+    setTimeout(advanceStage, 50);
+  }
+
+  // ── Update Stage 1: Raw ──
+  function updateStage1(sample) {
+    const body = document.getElementById('stage1Body');
+    const tp_tx = (sample.throughput_tx_mbps || 0).toFixed(1);
+    const tp_rx = (sample.throughput_rx_mbps || 0).toFixed(1);
+    const retry = (sample.retry_rate || 0).toFixed(4);
+    const txp = (sample.tx_per_pct || 0).toFixed(1);
+    const rxp = (sample.rx_per_pct || 0).toFixed(1);
+    const bfi = sample.bfi_phi_mean !== null ? `\nBFI: ${sample.bfi_phi_mean !== null ? sample.bfi_phi_mean.toFixed(4) : '—'}` : '';
+    body.innerHTML = `<span class="val">TP_TX: ${tp_tx}</span> Mbps\n<span class="val">TP_RX: ${tp_rx}</span> Mbps\n<span class="val">Retry: ${retry}</span>\n<span class="val">TX_PER: ${txp}%</span>  <span class="val">RX_PER: ${rxp}%</span>\n<span class="val">RSSI: ${sample.rssi0||0}/${sample.rssi1||0}/${sample.rssi2||0}/${sample.rssi3||0}</span>${bfi}`;
+  }
+
+  // ── Update Stage 2: Extract ──
+  function updateStage2(sample) {
+    const body = document.getElementById('stage2Body');
+    let html = '<div class="feat-mini">';
+    FEATURE_KEYS.forEach(k => {
+      const v = sample[k];
+      const display = v !== null && v !== undefined ? (typeof v === 'number' ? v.toFixed(4) : v) : '—';
+      const short = k.replace('throughput_','tp_').replace('_pct','%');
+      html += `<span class="fn">${short}</span><span class="fv">${display}</span>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+
+  // ── Update Stage 3: Scale ──
+  function updateStage3(sample) {
+    const body = document.getElementById('stage3Body');
+    if (!forestData) {
+      body.innerHTML = '<div class="formula">z = (x &minus; &mu;) / &sigma;</div>';
+      return;
+    }
+    let html = '<div style="max-height:180px;overflow-y:auto">';
+    FEATURE_KEYS.forEach((k, i) => {
+      const raw = parseFloat(sample[k]) || 0;
+      const mean = forestData.scaler.mean[i];
+      const scale = forestData.scaler.scale[i];
+      const z = (raw - mean) / scale;
+      const short = k.replace('throughput_','tp_').replace('_pct','%');
+      html += `<div class="scale-row">
+        <span class="feat">${short.substring(0,6)}</span>
+        <span class="raw">${raw.toFixed(2)}</span>
+        <span class="arrow">&rarr;</span>
+        <span class="z">${z.toFixed(3)}</span>
+      </div>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+
+  // ── Update Stage 4: Forest ──
+  function updateStage4(sample) {
+    const body = document.getElementById('stage4Body');
+    if (!forestData) {
+      body.innerHTML = '<div class="waiting-overlay">Loading&hellip;</div>';
+      return;
+    }
+    const info = computePaths(sample);
+    if (!info) return;
+    let html = '';
+    info.depths.forEach((d, i) => {
+      const color = d <= 4 ? 'var(--danger)' : 'var(--ok)';
+      html += `<div style="color:${color}">Tree ${i+1}: depth ${d}</div>`;
+    });
+    html += `<div style="margin-top:4px;color:var(--text)">Avg: <strong>${info.avgDepth.toFixed(2)}</strong></div>`;
+    body.innerHTML = html;
+  }
+
+  // ── Update Stage 5: Score ──
+  function updateStage5(sample) {
+    const body = document.getElementById('stage5Body');
+    if (sample.anomaly_score === null || sample.anomaly_score === undefined) {
+      body.innerHTML = '<div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>';
+      return;
+    }
+    const score = sample.anomaly_score;
+    const isAnom = sample.is_anomaly;
+    const verdictClass = isAnom ? 'verdict-bad' : 'verdict-ok';
+    const verdictText = isAnom ? 'ANOMALY' : 'NORMAL';
+    body.innerHTML = `<div><span class="label">Score:</span> <span class="val">${score.toFixed(6)}</span></div>
+      <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
+      <div style="margin-top:6px"><span class="${verdictClass}">${verdictText}</span></div>`;
+  }
+
+  // ── Full update on new sample ──
+  function onSample(sample) {
+    latestSample = sample;
+    updateStage1(sample);
+    updateStage2(sample);
+    updateStage3(sample);
+    updateStage4(sample);
+    updateStage5(sample);
+    renderTrees(sample);
+    animatePipeline(sample);
+  }
+
+  // ── WebSocket ──
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onmessage = function(e) {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'meta' || msg.type === 'session' || msg.type === 'log' || msg.type === 'status' || msg.type === 'calib') return;
+        if (msg.anomaly_score !== null && msg.anomaly_score !== undefined) {
+          onSample(msg);
+        }
+      } catch(err) {}
+    };
+    ws.onclose = function() {
+      setTimeout(connectWS, 3000);
+    };
+    ws.onerror = function() {};
+  }
+
+  // ── Init ──
+  loadForest();
+  connectWS();
+
+})();
+</script>
 </body>
 </html>

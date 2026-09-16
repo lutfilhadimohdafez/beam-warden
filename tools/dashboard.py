@@ -762,6 +762,39 @@ async def _model_status(request: Request) -> JSONResponse:
     })
 
 
+async def _forest_viz(request: Request) -> JSONResponse:
+    """GET /forest-viz — isolation forest structure for live visualization."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    if DETECTOR is None:
+        return JSONResponse({"error": "no model loaded"})
+    model = DETECTOR["model"]
+    scaler = DETECTOR["scaler"]
+    # Sample first 4 estimators
+    n_trees = min(4, len(model.estimators_))
+    trees = []
+    for i in range(n_trees):
+        tree = model.estimators_[i].tree_
+        trees.append({
+            "children_left": tree.children_left.tolist(),
+            "children_right": tree.children_right.tolist(),
+            "feature": tree.feature.tolist(),
+            "threshold": tree.threshold.tolist(),
+            "n_node_samples": tree.n_node_samples.tolist(),
+        })
+    return JSONResponse({
+        "features": DETECTOR["features"],
+        "scaler": {
+            "mean": scaler.mean_.tolist(),
+            "scale": scaler.scale_.tolist(),
+        },
+        "trees": trees,
+        "n_estimators": model.n_estimators,
+        "contamination": model.contamination,
+        "max_samples": model.max_samples_,
+    })
+
+
 # ── calibration endpoints ─────────────────────────────────────────────────
 async def _calibrate_capture(request: Request) -> JSONResponse:
     if not _is_loopback(request):
@@ -1041,6 +1074,7 @@ app = Starlette(
         Route("/run/{name}", _run_endpoint, methods=["POST"]),
         Route("/stop/{name}", _stop_endpoint, methods=["POST"]),
         Route("/model-status", _model_status),
+        Route("/forest-viz", _forest_viz),
         Route("/calibrate/capture", _calibrate_capture, methods=["POST"]),
         Route("/calibrate/reset", _calibrate_reset, methods=["POST"]),
         Route("/calibrate/train", _calibrate_train, methods=["POST"]),
