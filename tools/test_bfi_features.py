@@ -21,6 +21,7 @@ from bfi_features import (
     compute_NANG,
     decode_angles,
     extract_features,
+    frame_to_features,
     get_bitwidths,
     _meta_rows,
     _all_frame_bytes,
@@ -69,6 +70,23 @@ def main() -> None:
 
     assert decoded_count > 100, f"decoded {decoded_count} frames, expected >100"
     print(f"[PASS] decoded {decoded_count} frames, all shapes valid, all angles > 0")
+
+    # --- frame_to_features consistency check ---
+    features_via_helper = []
+    ws: dict = {}
+    for fn, mc_hex, rl in rows:
+        info = _mimo_and_report(pcap, fn, mc_hex, rl, frame_bytes_cache=fb_cache)
+        feat = frame_to_features(
+            info["report"], int(info["nr"]), int(info["nc"]),
+            int(info["codebook"]), int(info["feedback_type"]),
+            ws, frame_id=int(fn), window=10,
+        )
+        if feat is not None:
+            features_via_helper.append(feat)
+    assert len(features_via_helper) == decoded_count, (
+        f"frame_to_features yielded {len(features_via_helper)}, expected {decoded_count}"
+    )
+    print(f"[PASS] frame_to_features produced {len(features_via_helper)} dicts")
 
     # --- CSV output checks ---
     features = extract_features(pcap, window=10)

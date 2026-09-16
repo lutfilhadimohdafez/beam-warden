@@ -8,3 +8,5 @@ __pycache__/
 __pycache__/
 *.pyc
 Wi-BFI/
+models/training_history.json
+results/sessions/
