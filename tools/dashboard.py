@@ -52,6 +52,8 @@ _BFI_KEYS = [
 ]
 _bfi_thread: threading.Thread | None = None
 _bfi_stop: threading.Event | None = None
+_monitor_setup_done = False  # True once /monitor-setup ran → shutdown should restore networking
+_monitor_iface = "mon0"      # the iface set to monitor, for teardown on shutdown
 
 
 def _merge_bfi(msg: dict) -> dict:
@@ -1018,11 +1020,28 @@ async def _monitor_setup(request: Request) -> JSONResponse:
                 status_code=500,
             )
         # iface is now in monitor mode → (re)start the BFI stream on it so CSI flows
+        global _monitor_setup_done, _monitor_iface
+        _monitor_setup_done = True
+        _monitor_iface = iface
         _start_bfi(iface)
         return JSONResponse({"ok": True, "bfi_started": True,
                              "output": stdout.decode("utf-8", errors="replace").strip()})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+# ── start BFI stream on an already-monitor iface (no pkexec) ───────────────
+async def _bfi_start(request: Request) -> JSONResponse:
+    """POST /bfi-start {iface} — start the BFI capture on an iface already in monitor mode."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    iface = body.get("iface", "mon0")
+    _start_bfi(iface)
+    return JSONResponse({"ok": True, "iface": iface})
 
 
 # ── shutdown endpoint ─────────────────────────────────────────────────────
@@ -1041,12 +1060,29 @@ async def _shutdown(request: Request) -> JSONResponse:
         except (asyncio.CancelledError, Exception):
             pass
         _current_task = None
+    # If we put an iface into monitor mode this session, tear it down + restore networking
+    restored = False
+    if _monitor_setup_done:
+        teardown = (
+            f"iw dev {_monitor_iface} del 2>/dev/null; "
+            f"systemctl start NetworkManager 2>/dev/null; "
+            f"systemctl start iwd 2>/dev/null; true"
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pkexec", "sh", "-c", teardown,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            restored = True
+        except Exception:
+            pass
     # Schedule SIGTERM after response is sent
     def _kill():
         time.sleep(0.3)
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=_kill, daemon=True).start()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "networking_restored": restored})
 
 
 # ── BFI live stream thread ────────────────────────────────────────────────
@@ -1195,6 +1231,7 @@ app = Starlette(
         Route("/training-history", _training_history),
         Route("/monitor-status", _monitor_status),
         Route("/monitor-setup", _monitor_setup, methods=["POST"]),
+        Route("/bfi-start", _bfi_start, methods=["POST"]),
         Route("/shutdown", _shutdown, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),

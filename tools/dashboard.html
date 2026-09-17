@@ -2796,17 +2796,32 @@
     return (el && el.value.trim()) || "mon0";
   }
 
+  var bfiRequested = false;  /* did we ask the server to start the BFI stream this session? */
+
+  function startBfiStream(iface) {
+    fetch("/bfi-start", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ iface: iface }),
+    }).catch(function () {});
+  }
+
   function checkMonitorGate() {
     var panel = document.getElementById("bfiPanel");
     var locked = document.getElementById("bfiLocked");
     if (!panel || !locked) return;
     /* CSI comes from a file in replay/pcap — only gate on monitor in LIVE mode */
     if (runningMode !== "live") { panel.style.display = ""; locked.style.display = "none"; return; }
-    fetch("/monitor-status?iface=" + encodeURIComponent(bfiIfaceName()))
+    var iface = bfiIfaceName();
+    fetch("/monitor-status?iface=" + encodeURIComponent(iface))
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (d && d.is_monitor) { panel.style.display = ""; locked.style.display = "none"; }
-        else { panel.style.display = "none"; locked.style.display = ""; }
+        if (d && d.is_monitor) {
+          panel.style.display = ""; locked.style.display = "none";
+          /* monitor up but nothing may be capturing (e.g. after a restart) → start the stream once */
+          if (!bfiRequested) { bfiRequested = true; startBfiStream(iface); }
+        } else {
+          panel.style.display = "none"; locked.style.display = ""; bfiRequested = false;
+        }
       })
       .catch(function () {});
   }
@@ -2817,19 +2832,30 @@
       var iface = bfiIfaceName();
       var chEl = document.getElementById("mcChannel");
       var channel = (chEl && chEl.value.trim()) || "48";
-      showConfirm("Enable BFI monitor",
-        "Set " + iface + " to monitor mode? This needs admin rights (a system password prompt will appear).",
-        function () {
-          $bfiUnlock.textContent = "Enabling…";
-          fetch("/monitor-setup", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ iface: iface, channel: channel }),
-          }).then(function (r) { return r.json(); }).then(function (d) {
-            $bfiUnlock.textContent = "Enable BFI Monitor";
-            if (d && d.ok) { checkMonitorGate(); }
-            else { showError("Monitor setup failed: " + ((d && d.error) || "unknown")); }
-          }).catch(function (e) { $bfiUnlock.textContent = "Enable BFI Monitor"; showError("Monitor setup error: " + e); });
-        });
+      fetch("/monitor-status?iface=" + encodeURIComponent(iface))
+        .then(function (r) { return r.json(); })
+        .then(function (st) {
+          if (st && st.is_monitor) {
+            /* already monitor — just start the capture, no password needed */
+            $bfiUnlock.textContent = "Starting…";
+            startBfiStream(iface); bfiRequested = true;
+            setTimeout(function () { $bfiUnlock.textContent = "Enable BFI Monitor"; checkMonitorGate(); }, 800);
+            return;
+          }
+          showConfirm("Enable BFI monitor",
+            "Set " + iface + " to monitor mode? This needs admin rights (a system password prompt will appear).",
+            function () {
+              $bfiUnlock.textContent = "Enabling…";
+              fetch("/monitor-setup", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ iface: iface, channel: channel }),
+              }).then(function (r) { return r.json(); }).then(function (d) {
+                $bfiUnlock.textContent = "Enable BFI Monitor";
+                if (d && d.ok) { bfiRequested = true; checkMonitorGate(); }
+                else { showError("Monitor setup failed: " + ((d && d.error) || "unknown")); }
+              }).catch(function (e) { $bfiUnlock.textContent = "Enable BFI Monitor"; showError("Monitor setup error: " + e); });
+            });
+        }).catch(function () {});
     });
   }
 
