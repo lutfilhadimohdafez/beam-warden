@@ -1946,6 +1946,7 @@
   /* ---- Handle telemetry sample ---- */
   function handleMessage(d) {
     /* Route by type: log/status → Mission Control, meta/telemetry → existing */
+    if (d.mode) { runningMode = d.mode; }
     if (d.type === "log") {
       appendConsole(d.task, d.stream, d.line);
       return;
@@ -2768,6 +2769,77 @@
     if (localStorage.getItem("rf-hidden") === "1") rfHide(); else rfShow();
     if (localStorage.getItem("rf-collapsed") === "1") rfMinimize(); else rfExpand();
   } catch (e) {}
+
+  /* ---- BFI/CSI monitor gating (FIX 2) + shutdown (FIX 3) ---- */
+  var runningMode = "";
+
+  function showConfirm(title, body, onConfirm) {
+    var ov = document.getElementById("modalOverlay");
+    if (!ov) { if (window.confirm) { /* no-op: avoid blocking dialog */ } return; }
+    document.getElementById("modalTitle").textContent = title;
+    document.getElementById("modalBody").textContent = body;
+    ov.classList.add("visible");
+    var cancel = document.getElementById("modalCancel");
+    var ok = document.getElementById("modalConfirm");
+    function close() { ov.classList.remove("visible"); cancel.onclick = null; ok.onclick = null; }
+    cancel.onclick = close;
+    ok.onclick = function () { close(); onConfirm(); };
+  }
+
+  function bfiIfaceName() {
+    var el = document.getElementById("sessionBfiIface");
+    return (el && el.value.trim()) || "mon0";
+  }
+
+  function checkMonitorGate() {
+    var panel = document.getElementById("bfiPanel");
+    var locked = document.getElementById("bfiLocked");
+    if (!panel || !locked) return;
+    /* CSI comes from a file in replay/pcap — only gate on monitor in LIVE mode */
+    if (runningMode !== "live") { panel.style.display = ""; locked.style.display = "none"; return; }
+    fetch("/monitor-status?iface=" + encodeURIComponent(bfiIfaceName()))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.is_monitor) { panel.style.display = ""; locked.style.display = "none"; }
+        else { panel.style.display = "none"; locked.style.display = ""; }
+      })
+      .catch(function () {});
+  }
+
+  var $bfiUnlock = document.getElementById("bfiUnlockBtn");
+  if ($bfiUnlock) {
+    $bfiUnlock.addEventListener("click", function () {
+      var iface = bfiIfaceName();
+      var chEl = document.getElementById("mcChannel");
+      var channel = (chEl && chEl.value.trim()) || "48";
+      showConfirm("Enable BFI monitor",
+        "Set " + iface + " to monitor mode? This needs admin rights (a system password prompt will appear).",
+        function () {
+          $bfiUnlock.textContent = "Enabling…";
+          fetch("/monitor-setup", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ iface: iface, channel: channel }),
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            $bfiUnlock.textContent = "Enable BFI Monitor";
+            if (d && d.ok) { checkMonitorGate(); }
+            else { showError("Monitor setup failed: " + ((d && d.error) || "unknown")); }
+          }).catch(function (e) { $bfiUnlock.textContent = "Enable BFI Monitor"; showError("Monitor setup error: " + e); });
+        });
+    });
+  }
+
+  var $shutdownBtn = document.getElementById("shutdownBtn");
+  if ($shutdownBtn) {
+    $shutdownBtn.addEventListener("click", function () {
+      showConfirm("Shut down Beam Warden", "Stop Beam Warden and close the server?", function () {
+        fetch("/shutdown", { method: "POST" }).catch(function () {});
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;font-family:var(--font-mono,monospace);color:var(--muted,#888);">Beam Warden stopped — you can close this tab.</div>';
+      });
+    });
+  }
+
+  checkMonitorGate();
+  setInterval(checkMonitorGate, 5000);
 })();
 </script>
 </body>
