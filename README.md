@@ -21,14 +21,21 @@ without touching the Wi-Fi protocol itself.
 
 | # | Objective | Target | Status |
 |---|-----------|--------|--------|
-| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **injection proven 30/30 on real target**; forge step pending HE port (see §6) |
+| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **genuine 4×4 target (AX3200) live**; attack **validated offline** on real 4×4 HE BFI (`main_su --pcap` → `4x2 forge=null-steer`); live throughput-drop measurement pending |
 | 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — 150-sample normal dataset + live dashboard |
-| 3 | ML anomaly detection | ≥55% accuracy | 🟡 Isolation Forest built + wired; **BFI→CSI feature pipeline validated** (V unitary 1e-16) and detectable on synthetic attack (98.8%); real-world accuracy pending Obj-1 attack data from a 4×4 AP |
+| 3 | ML anomaly detection | ≥55% accuracy | 🟡 Isolation Forest built + wired; **BFI→CSI pipeline validated** (V unitary 1e-16), 98.8% on synthetic attack, and now has a **real 4×4 "normal" dataset** (56 `Nr=4` frames); real-world accuracy pending the live attack-class dataset |
 
 **Proven on hardware this cycle:** the attacker (Alfa AWUS036ACM) injects crafted
-802.11 frames onto the target's channel (30/30 ACKs); the target (Skyworth GN630v,
-MediaTek MT7916) emits real beamforming feedback we capture live; that feedback
-is **802.11ax (HE)**, which pins down the exact remaining work (§6).
+802.11 frames onto the target's channel (30/30 ACKs); the target emits real
+**802.11ax (HE)** beamforming feedback we capture live.
+
+**Update — 2026-09-18:** the genuine **4×4** target is now the **Xiaomi AX3200**
+(MediaTek MT7915, radio `wl0`, ch44/BW80). We captured its real 4×4 HE BFI
+off-air (**56 frames, all `Nr=4 Nc=2 NANG=10`** → `data/bfi_ax3200_4x4*`) and
+`main_su --pcap` validated the null-steer forge against it. The GN630v (2×2)
+remains a valid victim/normal-traffic leg. The `rai1`/ch48/GN630v labels in the
+diagrams below describe the earlier 2×2 dev rig; the live 4×4 target is the
+AX3200 on `wl0`/ch44.
 
 ---
 
@@ -219,7 +226,7 @@ then plug those into `main_su`. Turns "decode HE from scratch" into "set 4 value
 
 ```
    GN630v AP (victim + sensor)
-        │  iwpriv rai1 stat   (poll every 2 s, over telnet)
+        │  iwpriv wl0 stat  +  sysfs {tx,rx}_bytes  (poll 2 s, telnet)
         ▼
    RAW COUNTERS (cumulative)          INSTANT GAUGES
      Tx success / Tx fail               Rssi0..3  (per-chain → SNR)
@@ -266,7 +273,7 @@ live sample is judged against normal on identical footing.
 The detector is fed by **two independent vantages** of the same link:
 
 ```
-  A. MAC counters   telnet → GN630v → iwpriv rai1 stat   (the §7 pipeline)
+  A. MAC counters   telnet → AX3200 → iwpriv wl0 stat    (the §7 pipeline)
      throughput, retry_rate, tx/rx_per, rssi0..3, tx_mcs, tx_nss
      → sees the AFTERMATH (throughput drop, PER spike)
 
@@ -286,12 +293,37 @@ beamforming reports (φ/ψ Givens angles, ported and V-unitarity-validated from
 | `bfi_subcarrier_var` | variance across subcarriers = multipath / frequency selectivity |
 | `bfi_phi/psi_temporal_var` | frame-to-frame channel stability (rolling window) |
 
-Because BFI is captured **off-air**, these CSI features work on the **current 2×2
-rig today** — decoupling the normal-side dataset from the 4×4 hardware blocker.
-Attack-side CSI needs the 4×4 AP, or the synthetic generator
-(`tools/make_synthetic_bfi_attack.py`, 98.8% detection / 2.3% FP) for pipeline
-validation in the meantime. *(Raw per-subcarrier CSI would need PicoScenes + an
+Because BFI is captured **off-air**, these CSI features work regardless of AP.
+With the AX3200 online we now have a **real 4×4 normal dataset**
+(`data/bfi_ax3200_4x4_features.csv`); the synthetic generator
+(`tools/make_synthetic_bfi_attack.py`, 98.8% detection / 2.3% FP) still stands in
+for the attack class until the live injection dataset is captured. *(Raw per-subcarrier CSI would need PicoScenes + an
 AX210 + Ubuntu — see Future Work.)*
+
+---
+
+### 7.3 How data is extracted off the router
+
+Everything comes off a **single telnet session** to the AP — nothing is
+installed on the router itself.
+
+**Login:** `192.168.31.1` · user `root` · password from
+`python unlock-ax3200.py <S/N>` (= `md5(SN + salt)[:8]`, e.g. `REDACTED`).
+Stock **XiaoQiang** firmware; the genuine **4×4 5 GHz radio is `wl0`**
+(`wl1/wl13/wl14` are the 2.4 GHz mt7622).
+
+| # | Channel | Command | Gives |
+|---|---|---|---|
+| 1 | **MAC/PHY counters** | `iwpriv wl0 stat` (poll 2 s) | per-chain `Rssi0..3`, Tx/Rx success/fail + PER, `Last TX/RX Rate` (NSS/MCS/BW/GI/HE). Parsed by `parse_iwpriv_stat()`. |
+| 2 | **Throughput (bytes)** | `cat /sys/class/net/wl0/statistics/{tx,rx}_bytes` | byte counters, diffed over the interval → `throughput_tx/rx_mbps`. **Needed because this firmware's `iwpriv stat` has no byte fields** (the GN630v's did). `read_iface_bytes()`. |
+| 3 | **Per-station table** | `iwpriv wl0 show stainfo` → `dmesg \| tail` | per-client MAC / MODE / `RSSI0-3` / PHY / MCS (no `wlanconfig` on this fw). |
+| 4 | **Off-air BFI** (not from the router) | Alfa in monitor mode on `wl0`'s channel | the victim's HE Beamforming Report frames — the exact BFI the attack forges → `bfi_features.py`. |
+
+**Direction matters:** `tx_bytes` = router→client (**downlink**, the beamformed
+direction the attack degrades); `rx_bytes` = client→router (uplink). The attack
+demo measures the **downlink** drop (`iperf3 -R` to the victim, watch `wl0`
+`tx_bytes`). Channels 1–3 are wired into `dashboard.py` / `gn630v_telemetry.py`;
+channel 4 is the off-air pcap path (§7.2).
 
 ---
 
@@ -299,7 +331,7 @@ AX210 + Ubuntu — see Future Work.)*
 
 | Tool | What it does |
 |---|---|
-| `tools/gn630v_telemetry.py` | telnet → `iwpriv rai1 stat` every 2 s → CSV (RSSI/MCS/throughput/retry), labelled `normal`/`attack`. Backed by `gn630v_telnet.py` (stdlib raw-socket telnet). |
+| `tools/gn630v_telemetry.py` | telnet → `iwpriv wl0 stat` (+ sysfs bytes) every 2 s → CSV (RSSI/MCS/throughput/retry), labelled `normal`/`attack`. Backed by `gn630v_telnet.py` (stdlib raw-socket telnet). Defaults now target the AX3200; pass GN630v creds via flags. |
 | `tools/dashboard.py` + `dashboard.html` | **live** telemetry web dashboard **+ Command Center** (Starlette + WebSocket + Chart.js). `--mode live` polls the router; `--mode replay` streams a CSV (demo-safe, no router); `--bfi-iface` folds live off-air CSI features in. Hosts the button-driven task runner (see §9). Run via `.venv/bin/python`. See `docs/dashboard.md`. |
 | `tools/tasks.py` | Command Center task registry — the single source of truth for the CLI tasks the dashboard can run (predefined only; no arbitrary shell). |
 | `tools/bfi_features.py` | decode captured HE compressed beamforming reports → per-frame CSI features CSV (`--pcap`/`--out`); also `stream_features()` for live off-air decode. V-unitarity validated. |
@@ -371,7 +403,9 @@ busy in monitor mode).
 | `data/bfi_he_capture.pcap` | — | 171 live HE beamforming reports (Gate-2 evidence) |
 | `data/bfi_features.csv` | **normal** | 171 rows of CSI features decoded from the BFI capture (`bfi_features.py`) |
 | `data/bfi_synthetic_attack.csv` | normal + **attack** | 171 real-normal + 171 synthetic-attack CSI rows, labelled (`make_synthetic_bfi_attack.py`); 98.8% detectable |
-| _(next)_ `data/attack_*.csv` | **attack** | same link while forged BFI is injected (needs the 4×4 AP) |
+| `data/bfi_ax3200_4x4.pcap` | — | 56 real 4×4 HE beamforming reports off the AX3200 (BSSID `5c:02:14:b0:34:13`) |
+| `data/bfi_ax3200_4x4_features.csv` | **normal** | 56 rows of CSI features, all `Nr=4 Nc=2 NANG=10`, from the HE_SU client `e2:65:2c:d9:25:fb` |
+| _(next)_ `data/attack_*.csv` | **attack** | same link while forged BFI is injected into the AX3200 (`main_su`) |
 
 ---
 
@@ -379,7 +413,8 @@ busy in monitor mode).
 
 | Role | Device / tech |
 |---|---|
-| Target AP / telemetry sensor | Skyworth **GN630v** ONT — MediaTek **MT7916**, 5 GHz ch48, SU/MU HE beamforming |
+| **4×4 target AP** (live) | Xiaomi **AX3200** (RB01) — MediaTek **MT7915** 4T4R, XiaoQiang fw, radio `wl0`, 5 GHz ch44/BW80, 802.11ax; telnet root via `unlock-ax3200.py` |
+| 2×2 dev AP / normal-traffic leg | Skyworth **GN630v** ONT — MediaTek **MT7916**, 5 GHz ch48, SU/MU HE beamforming |
 | Attacker NIC | Alfa **AWUS036ACM** — MediaTek **MT7921** (`mt76`), monitor + injection |
 | Attack code | C++ (`main_su`), libpcap, Eigen3; aircrack-ng for injection verification |
 | Telemetry + ML | Python 3, Starlette/uvicorn (dashboard), scikit-learn (Isolation Forest) |
@@ -389,7 +424,7 @@ busy in monitor mode).
 
 ## 12. Repo layout
 
-- `docs/` — progress report, challenges logs (`challenges.md`, `challenges-2026-09-17.md`), Gate-2 findings, dashboard guide, ML-engine notes, hardware recon.
+- `docs/` — progress reports (`progress-report.md` + dated in `progress-reports/`), challenges logs (`challenges.md`, `challenges-2026-09-17.md`, `challenges-2026-09-18.md`), Gate-2 findings, dashboard guide, ML-engine notes, hardware recon.
 - `tools/` — our scripts (tracked).
 - `data/` — datasets + captures.
 - `BeamCraft_AE/`, `BFM-tool/` — external reference repos (gitignored). `BeamCraft_AE` = the VHT attack; `BFM-tool` = raw BFI capture.
