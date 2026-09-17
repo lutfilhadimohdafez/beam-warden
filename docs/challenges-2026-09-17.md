@@ -59,6 +59,42 @@ existing chains (disable, never add). The Mi 4A and AC2100 share the MT7615
 that is not soldered on.
 *Handled:* silicon is the ceiling; documented so no time is lost flashing firmware.
 
+**E4 — Why the attack needs a null space (BeamCraft's own math confirms Nr>Nc)** 🟢
+A natural misreading of the BeamCraft paper is *"the forged matrix just needs to be
+≈ 0, not a null space."* The paper says the opposite. Its argument:
+
+- The attacker injects a forged feedback matrix `Vf` to kill the equivalent channel
+  gain `U Λ Vᴴ Vf`. The naive idea — set `Vf = 0` — **explicitly does not work**,
+  because the feedback is compressed to **phases (Givens angles)**; reconstructing
+  any set of angles yields a matrix that is **never zero** (it is always
+  column-orthonormal — the same "V unitary, dev 0" our decoder validated). So a
+  near-zero `Vf` is unreachable through the real compressed-feedback format.
+- Instead the paper minimises `‖Λ Vᴴ Vf‖` and states the optimum:
+  **`Vf,★` must lie in the null space of the genuine feedback matrix `V`, i.e.
+  `Vᴴ Vf,★ = 0`**, computed via Gram–Schmidt. So `Vf ≈ 0` is the *strawman the paper
+  knocks down*; `Vf ⊥ V` (null space) is the actual method.
+
+**Why that forces Nr > Nc** (the hardware gate):
+`V` is `Nr × Nc` with orthonormal columns (`Nr` = AP TX antennas, `Nc` = victim
+streams). `Vᴴ Vf = 0` requires every column of `Vf` to be orthogonal to `col(V)`,
+i.e. to live in its **orthogonal complement, of dimension `Nr − Nc`**. A non-zero
+`Vf` therefore exists **iff `Nr − Nc ≥ 1`, i.e. `Nr > Nc`**. Gram–Schmidt only has a
+basis to build from when that complement is non-empty.
+
+- **2×2 (our GN630v vs a 2-stream victim):** `Nr = Nc = 2` → `V` is square unitary →
+  `col(V) = ℂ²` → orthogonal complement = `{0}` → the only solution is `Vf = 0`
+  (already ruled out) → **W = 0 → NaN**. This is exactly the degeneracy we proved,
+  and it is why a 2×2 radio can inject a forged frame but never collapse a full-rank
+  link.
+- **4×2 (Redmi AC2100 / Xiaomi AX3200 vs a 2-antenna client):** complement dimension
+  `4 − 2 = 2` → Gram–Schmidt yields a real orthogonal `Vf,★` → the AP beams
+  orthogonal to the channel → victim throughput ≈ 0. Attack lands.
+
+*Conclusion:* the paper's null-space formulation **is** the Nr>Nc requirement — it is
+not an alternative to it. This is the mathematical justification for why the 4×4
+5 GHz radio (§E2) is mandatory and the 2×2 is a genuine dead end (a legitimate,
+report-worthy research finding, not a rig limitation).
+
 ---
 
 ## F. Raw CSI extraction (PicoScenes)
