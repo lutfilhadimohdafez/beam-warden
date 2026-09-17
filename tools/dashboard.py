@@ -25,7 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gn630v_telemetry import compute_deltas, parse_iwpriv_stat
+from gn630v_telemetry import compute_deltas, parse_iwpriv_stat, read_iface_bytes
 from gn630v_telnet import GN630V
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -277,6 +277,11 @@ async def _producer_live() -> None:
             tick = time.time()
             text = await asyncio.to_thread(ont.run, f"iwpriv {args.iface} stat")
             parsed = await asyncio.to_thread(parse_iwpriv_stat, text)
+            tx_b, rx_b = await asyncio.to_thread(read_iface_bytes, ont, args.iface)
+            if tx_b:
+                parsed["bytes_sent"] = tx_b
+            if rx_b:
+                parsed["bytes_recv"] = rx_b
             now = time.time()
 
             if prev is not None and prev_t is not None:

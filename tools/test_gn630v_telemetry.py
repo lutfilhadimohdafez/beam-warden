@@ -5,7 +5,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gn630v_telemetry import parse_iwpriv_stat, compute_deltas
+from gn630v_telemetry import parse_iwpriv_stat, compute_deltas, read_iface_bytes
+
+
+class _FakeOnt:
+    """Stub GN630V: .run() returns a canned string."""
+    def __init__(self, out):
+        self._out = out
+
+    def run(self, _cmd):
+        return self._out
+
+
+def test_read_iface_bytes():
+    # sysfs cat output on the AX3200, incl. the echoed shell prompt.
+    ont = _FakeOnt("2269645006\n49800197995\nroot@XiaoQiang:~# ")
+    assert read_iface_bytes(ont, "wl0") == (2269645006, 49800197995)
+    # unavailable / empty output -> (0, 0), never raises.
+    assert read_iface_bytes(_FakeOnt(""), "wl0") == (0, 0)
 
 FIXTURE = Path(__file__).resolve().parent / "testdata" / "gn630v_iwpriv_stat_5g.txt"
 
@@ -119,5 +136,6 @@ if __name__ == "__main__":
     test_compute_deltas_counter_reset()
     test_parse_empty_block()
     test_parse_no_client()
+    test_read_iface_bytes()
     print("OK")
     sys.exit(0)

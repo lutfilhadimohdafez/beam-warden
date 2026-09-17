@@ -126,6 +126,29 @@ def parse_iwpriv_stat(text: str) -> dict:
     return d
 
 
+def read_iface_bytes(ont, iface: str) -> tuple:
+    """(tx_bytes, rx_bytes) from sysfs; (0, 0) if unavailable.
+
+    The AX3200 (XiaoQiang) `iwpriv <if> stat` exposes NO byte counters, so the
+    stat-based throughput reads 0. The kernel does keep them in sysfs — read
+    both in one telnet round-trip and grab the first two integers (the shell
+    echo/prompt is stripped by taking only the digits we asked cat to print).
+    # ponytail: this is TOTAL-iface throughput (all traffic on the radio);
+    #           per-station goodput would need iperf3 against a known victim.
+    """
+    try:
+        out = ont.run(
+            f"cat /sys/class/net/{iface}/statistics/tx_bytes "
+            f"/sys/class/net/{iface}/statistics/rx_bytes"
+        )
+        nums = re.findall(r"\d+", out)
+        if len(nums) >= 2:
+            return int(nums[0]), int(nums[1])
+    except Exception:
+        pass
+    return 0, 0
+
+
 def compute_deltas(prev: dict, curr: dict, dt: float) -> dict:
     """Throughput + retry rate between two snapshots, dt seconds apart."""
     bytes_sent_d = max(0, curr["bytes_sent"] - prev["bytes_sent"])
@@ -167,6 +190,11 @@ def run(args: argparse.Namespace) -> None:
                     tick_start = time.time()
                     text = ont.run(f"iwpriv {args.iface} stat")
                     parsed = parse_iwpriv_stat(text)
+                    tx_b, rx_b = read_iface_bytes(ont, args.iface)
+                    if tx_b:
+                        parsed["bytes_sent"] = tx_b
+                    if rx_b:
+                        parsed["bytes_recv"] = rx_b
                     now = time.time()
 
                     if prev is not None and prev_t is not None:
