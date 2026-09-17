@@ -975,7 +975,8 @@ async def _monitor_status(request: Request) -> JSONResponse:
             for line in text.splitlines():
                 stripped = line.strip()
                 if stripped.startswith("type"):
-                    val = stripped.split(":", 1)[-1].strip().lower()
+                    # iw prints "type monitor" (space), not "type: monitor"
+                    val = stripped[4:].strip().lstrip(":").strip().lower()
                     if val == "monitor":
                         result["is_monitor"] = True
     except Exception:
@@ -1016,7 +1017,10 @@ async def _monitor_setup(request: Request) -> JSONResponse:
                 {"ok": False, "error": err or f"pkexec exit code {proc.returncode}"},
                 status_code=500,
             )
-        return JSONResponse({"ok": True, "output": stdout.decode("utf-8", errors="replace").strip()})
+        # iface is now in monitor mode → (re)start the BFI stream on it so CSI flows
+        _start_bfi(iface)
+        return JSONResponse({"ok": True, "bfi_started": True,
+                             "output": stdout.decode("utf-8", errors="replace").strip()})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 

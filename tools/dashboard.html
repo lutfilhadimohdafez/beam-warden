@@ -1669,18 +1669,23 @@
   var $sessionReplayStart = document.getElementById("sessionReplayStart");
   var $sessionLiveConnect = document.getElementById("sessionLiveConnect");
   var $sessionStatus = document.getElementById("sessionStatus");
-  var activeSessionMode = "replay";
+  var activeSessionMode = "live";
+
+  function applySessionMode() {
+    sessionModeBtns.forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-session") === activeSessionMode);
+    });
+    $sessionReplayFields.style.display = activeSessionMode === "replay" ? "flex" : "none";
+    $sessionLiveFields.style.display = activeSessionMode === "live" ? "flex" : "none";
+  }
 
   sessionModeBtns.forEach(function (btn) {
     btn.addEventListener("click", function () {
       activeSessionMode = btn.getAttribute("data-session");
-      sessionModeBtns.forEach(function (b) {
-        b.classList.toggle("active", b.getAttribute("data-session") === activeSessionMode);
-      });
-      $sessionReplayFields.style.display = activeSessionMode === "replay" ? "flex" : "none";
-      $sessionLiveFields.style.display = activeSessionMode === "live" ? "flex" : "none";
+      applySessionMode();
     });
   });
+  applySessionMode();  /* default to Live on load (this is a live tool) */
 
   /* Populate replay file dropdown */
   fetch("/replay-files").then(function (r) { return r.json(); }).then(function (files) {
