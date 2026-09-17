@@ -10,3 +10,7 @@ __pycache__/
 Wi-BFI/
 models/training_history.json
 results/sessions/
+
+# raw off-air captures (huge) — commit only curated datasets
+data/*.pcapng
+data/bfi_*_2026*.pcap

@@ -18,10 +18,12 @@ BINARY = "/home/lutfil/fyp/BeamCraft_AE/main_su"
 
 DEFAULTS = {
     "iface": "mon0",
-    "ap": "fe:7a:58:92:b6:31",
-    "victim": "d2:93:e5:7c:20:71",
-    "channel": "48",
+    "ap": "5c:02:14:b0:34:13",       # Xiaomi AX3200 (RB01) 5GHz wl0, ch44
+    "victim": "e2:65:2c:d9:25:fb",   # HE_SU 2SS client (Nr=4 BFI confirmed)
+    "channel": "44",
     "alpha": "1.0",
+    # offset/type are VHT-flavored; the AX3200 is 802.11ax/HE so these likely
+    # need tuning (our HE frames are cat-30, action byte 0x30 not 0xe0).
     "offset": "33",
     "type": "0xe0",
 }
