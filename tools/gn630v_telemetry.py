@@ -200,10 +200,13 @@ def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--host", default="192.168.0.1", help="ONT host/IP")
-    p.add_argument("--user", default="tmadmin", help="telnet user")
+    # Defaults target the Xiaomi AX3200 (RB01) 4x4 — the live rig. wl0 = its
+    # MT7915 5GHz radio. (Old GN630v ONT was 192.168.0.1/tmadmin/REDACTED/rai1;
+    # pass those via flags to poll the GN630v instead.)
+    p.add_argument("--host", default="192.168.31.1", help="router host/IP")
+    p.add_argument("--user", default="root", help="telnet user")
     p.add_argument("--password", default="REDACTED", help="telnet password")
-    p.add_argument("--iface", default="rai1", help="wireless interface")
+    p.add_argument("--iface", default="wl0", help="wireless interface (AX3200 5GHz)")
     p.add_argument("--label", required=True, choices=["normal", "attack"],
                     help="Tags every row")
     p.add_argument("--interval", type=float, default=2.0,

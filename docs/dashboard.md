@@ -8,7 +8,7 @@ Live telnet poll of the router **or** CSV replay → WebSocket → live Chart.js
 Always use the project venv:
 
 ```bash
-# LIVE — poll the real GN630v (laptop must reach the router; default IP 192.168.0.1)
+# LIVE — poll the real router (laptop must reach it; AX3200 default IP 192.168.31.1)
 .venv/bin/python tools/dashboard.py --mode live
 
 # REPLAY — stream the captured normal dataset (works with NO router; demo fallback)
@@ -22,8 +22,8 @@ Then open **http://127.0.0.1:8080** in a browser.
 | Flag | Default | Notes |
 |------|---------|-------|
 | `--mode` | `live` | `live` (telnet poll) or `replay` (CSV) |
-| `--host` | `192.168.0.1` | GN630v telnet IP — change if the LAN gateway differs |
-| `--iface` | `rai1` | 5 GHz interface on the ONT |
+| `--host` | `192.168.31.1` | router telnet IP (AX3200; GN630v was 192.168.0.1) |
+| `--iface` | `wl0` | 5 GHz radio (AX3200 XiaoQiang; GN630v was rai1) |
 | `--interval` | `2.0` | seconds between samples |
 | `--csv` | `data/normal_iperf.csv` | replay source |
 | `--port` / `--bind` | `8080` / `127.0.0.1` | web server |
