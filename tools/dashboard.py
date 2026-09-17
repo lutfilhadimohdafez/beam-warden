@@ -1310,10 +1310,14 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(
         description="Beam Warden live telemetry dashboard backend"
     )
-    p.add_argument("--host", default="192.168.0.1")
-    p.add_argument("--user", default="tmadmin")
+    # Xiaomi AX3200 (RB01) — genuine 4x4 box, stock XiaoQiang firmware.
+    # Telnet creds: password from unlock-ax3200.py <S/N>. iface wl0 = the
+    # MT7915 4x4 5GHz radio (Rssi line shows 4 RX chains); wl1/wl13/wl14 are
+    # the mt7622 2.4GHz. (The old GN630v was 192.168.0.1/tmadmin/rai1.)
+    p.add_argument("--host", default="192.168.31.1")
+    p.add_argument("--user", default="root")
     p.add_argument("--password", default="REDACTED")
-    p.add_argument("--iface", default="rai1")
+    p.add_argument("--iface", default="wl0")
     p.add_argument("--interval", type=float, default=2.0)
     p.add_argument("--mode", choices=["live", "replay"], default=None)
     p.add_argument("--csv", default="data/normal_iperf.csv")
