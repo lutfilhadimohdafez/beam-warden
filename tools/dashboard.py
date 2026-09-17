@@ -1044,6 +1044,27 @@ async def _bfi_start(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "iface": iface})
 
 
+async def _find_monitor_ifaces() -> list[str]:
+    """Return all interfaces currently in monitor mode (parsed from `iw dev`)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "iw", "dev", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await proc.communicate()
+    except Exception:
+        return []
+    ifaces: list[str] = []
+    cur = None
+    for line in out.decode("utf-8", errors="replace").splitlines():
+        s = line.strip()
+        if s.startswith("Interface "):
+            cur = s.split(None, 1)[1].strip()
+        elif s.startswith("type ") and cur:
+            if s[4:].strip().lstrip(":").strip().lower() == "monitor":
+                ifaces.append(cur)
+    return ifaces
+
+
 # ── shutdown endpoint ─────────────────────────────────────────────────────
 async def _shutdown(request: Request) -> JSONResponse:
     """POST /shutdown — stop producer + BFI, then kill the server process."""
@@ -1060,11 +1081,15 @@ async def _shutdown(request: Request) -> JSONResponse:
         except (asyncio.CancelledError, Exception):
             pass
         _current_task = None
-    # If we put an iface into monitor mode this session, tear it down + restore networking
+    # Tear down ANY interface left in monitor mode + restore networking
     restored = False
-    if _monitor_setup_done:
+    mon_ifaces = await _find_monitor_ifaces()
+    if _monitor_setup_done and _monitor_iface not in mon_ifaces:
+        mon_ifaces.append(_monitor_iface)
+    if mon_ifaces:
+        dels = "; ".join(f"iw dev {i} del 2>/dev/null" for i in mon_ifaces)
         teardown = (
-            f"iw dev {_monitor_iface} del 2>/dev/null; "
+            f"{dels}; "
             f"systemctl start NetworkManager 2>/dev/null; "
             f"systemctl start iwd 2>/dev/null; true"
         )
