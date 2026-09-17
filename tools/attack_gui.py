@@ -240,7 +240,7 @@ class App(tk.Tk):
         ch = self._cfg("channel")
         iface = self._cfg("iface")
         cmd = (
-            "systemctl stop NetworkManager iwd; "
+            "nmcli device set wlan1 managed no; "
             "PHY=$(for p in /sys/class/ieee80211/phy*; do "
             "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
             f"iw dev {iface} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
@@ -372,14 +372,15 @@ class App(tk.Tk):
     def _restore_wifi(self):
         self._save_report(auto=False)
         self._set_status("Restoring WiFi…", "#fdd835")
-        self.println("Restoring WiFi (starting NetworkManager)…")
+        self.println("Restoring WiFi (re-managing wlan1)…")
 
         def _done(output: str):
             self.println(output.strip())
             self._set_status("Idle", "#888")
             self.println("WiFi restored.")
 
-        self._run_privileged("systemctl start NetworkManager", on_done=_done)
+        iface = self._cfg("iface")
+        self._run_privileged(f"iw dev {iface} del 2>/dev/null; nmcli device set wlan1 managed yes", on_done=_done)
 
     # -------------------------------------------------------- Report
     def _save_report(self, auto: bool = False):

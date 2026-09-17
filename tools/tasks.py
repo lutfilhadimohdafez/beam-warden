@@ -20,7 +20,7 @@ TASK_REGISTRY: dict[str, dict] = {
         "label": "Setup Monitor Mode",
         "cmd": [
             "sh", "-c",
-            "systemctl stop NetworkManager iwd; "
+            "nmcli device set wlan1 managed no; "
             "PHY=$(for p in /sys/class/ieee80211/phy*; do "
             "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
             "iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "

@@ -1036,7 +1036,7 @@ async def _monitor_setup(request: Request) -> JSONResponse:
     iface = body.get("iface", "mon0")
     channel = body.get("channel", "48")
     cmd = (
-        f"systemctl stop NetworkManager iwd; "
+        f"nmcli device set wlan1 managed no; "
         f"PHY=$(for p in /sys/class/ieee80211/phy*; do "
         f"[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
         f"iw dev {iface} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
@@ -1129,8 +1129,7 @@ async def _shutdown(request: Request) -> JSONResponse:
         dels = "; ".join(f"iw dev {i} del 2>/dev/null" for i in mon_ifaces)
         teardown = (
             f"{dels}; "
-            f"systemctl start NetworkManager 2>/dev/null; "
-            f"systemctl start iwd 2>/dev/null; true"
+            f"nmcli device set wlan1 managed yes 2>/dev/null; true"
         )
         try:
             proc = await asyncio.create_subprocess_exec(
