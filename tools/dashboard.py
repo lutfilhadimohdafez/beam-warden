@@ -54,6 +54,29 @@ _bfi_thread: threading.Thread | None = None
 _bfi_stop: threading.Event | None = None
 _monitor_setup_done = False  # True once /monitor-setup ran → shutdown should restore networking
 _monitor_iface = "mon0"      # the iface set to monitor, for teardown on shutdown
+_calibrated = False          # True once the model has been retrained for THIS environment this session
+_latest_clients: list = []   # connected clients (from brctl showmacs br0 on the live telnet)
+
+
+def _parse_clients(macs_text: str, arp_text: str) -> list:
+    """Parse `brctl showmacs br0` (non-local MACs = clients) + `/proc/net/arp` (IPs)."""
+    ip_by_mac = {}
+    for line in arp_text.splitlines()[1:]:
+        p = line.split()
+        if len(p) >= 4 and p[3] not in ("00:00:00:00:00:00", ""):
+            ip_by_mac[p[3].lower()] = p[0]
+    clients = []
+    seen = set()
+    for line in macs_text.splitlines():
+        p = line.split()
+        # columns: "port  mac  is_local?  ageing"
+        if len(p) >= 4 and p[1].count(":") == 5 and p[2].lower() == "no":
+            mac = p[1].lower()
+            if mac in seen:
+                continue
+            seen.add(mac)
+            clients.append({"mac": mac, "ip": ip_by_mac.get(mac, ""), "age": p[3]})
+    return clients
 
 
 def _merge_bfi(msg: dict) -> dict:
@@ -151,6 +174,8 @@ def _build_message(
         "temp_c": temp_c,
         "anomaly_score": None,
         "is_anomaly": False,
+        "detector_calibrated": _calibrated,
+        "clients": [],
         "index": 0,
         "total": 0,
         "playing": True,
@@ -239,6 +264,7 @@ async def _producer_live() -> None:
     ont = None
     prev: dict | None = None
     prev_t: float | None = None
+    client_ctr = 0
 
     while True:
         try:
@@ -279,6 +305,17 @@ async def _producer_live() -> None:
                 temp_c=parsed["temp_c"],
             )
             msg["raw"] = text
+            # refresh connected-clients list every ~7 ticks on the SAME telnet (no 2nd session)
+            client_ctr += 1
+            if client_ctr == 1 or client_ctr % 7 == 0:
+                try:
+                    macs = await asyncio.to_thread(ont.run, "brctl showmacs br0")
+                    arp = await asyncio.to_thread(ont.run, "cat /proc/net/arp")
+                    global _latest_clients
+                    _latest_clients = _parse_clients(macs, arp)
+                except Exception:
+                    pass
+            msg["clients"] = _latest_clients
             _merge_bfi(msg)
             score, is_anom = score_sample(msg)
             msg["anomaly_score"] = score
@@ -871,6 +908,8 @@ async def _calibrate_train(request: Request) -> JSONResponse:
     det = _reload_detector()
     if det is None:
         return JSONResponse({"error": "model reload failed after training"}, status_code=500)
+    global _calibrated
+    _calibrated = True  # model now baselined for the current environment
     # Compute training FPR from the output
     fpr_str = ""
     fpr_val = None

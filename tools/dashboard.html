@@ -375,6 +375,12 @@
     animation: pulse-text 1.2s ease-in-out infinite;
   }
   .detect-status.offline { color: var(--muted); font-size: 1.1rem; font-weight: 600; }
+  .detect-status.uncalib { color: var(--accent); font-size: 1.3rem; }
+  .clients-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .clients-row { display: flex; justify-content: space-between; gap: 12px; font-family: var(--font-mono); font-size: 0.62rem; padding: 4px 8px; background: var(--panel-2); border: 1px solid var(--border); }
+  .clients-row .cmac { color: var(--accent); }
+  .clients-row .cip { color: var(--muted); }
+  .clients-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted-dim); padding: 4px 8px; }
   .detect-score-wrap {
     display: flex;
     flex-direction: column;
@@ -1311,6 +1317,10 @@
           <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
         </div>
       </div>
+      <div class="section-label stagger" id="clientsLabel">CLIENTS CONNECTED &middot; <span id="clientsCount">0</span></div>
+      <div class="clients-list stagger" id="clientsList">
+        <div class="clients-empty">no clients (live mode only)</div>
+      </div>
       <div class="section-label stagger" id="bfiSectionLabel">BFI / CSI STREAM</div>
       <div class="tiles stagger" id="bfiPanel">
         <div class="tile">
@@ -1618,6 +1628,21 @@
   var $errorBar     = document.getElementById("errorBar");
   var $detectStatus = document.getElementById("detectStatus");
   var $detectScoreVal = document.getElementById("detectScoreVal");
+  var $clientsList  = document.getElementById("clientsList");
+  var $clientsCount = document.getElementById("clientsCount");
+
+  function renderClients(list) {
+    if (!$clientsList || !$clientsCount) return;
+    $clientsCount.textContent = list.length;
+    if (!list.length) {
+      $clientsList.innerHTML = '<div class="clients-empty">no clients (live mode only)</div>';
+      return;
+    }
+    $clientsList.innerHTML = list.map(function (c) {
+      return '<div class="clients-row"><span class="cmac">' + c.mac +
+        '</span><span class="cip">' + (c.ip || "—") + '</span></div>';
+    }).join("");
+  }
   var $valTxTput    = document.getElementById("valTxTput");
   var $valRetry     = document.getElementById("valRetry");
   var $valTxPer     = document.getElementById("valTxPer");
@@ -2040,6 +2065,11 @@
       $detectStatus.className = "detect-status offline";
       $detectStatus.textContent = "DETECTOR OFFLINE";
       $detectScoreVal.textContent = "\u2014";
+    } else if (runningMode === "live" && d.detector_calibrated === false) {
+      /* live but the model was never baselined for THIS environment → don't cry attack */
+      $detectStatus.className = "detect-status uncalib";
+      $detectStatus.textContent = "UNCALIBRATED";
+      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
     } else if (d.is_anomaly) {
       $detectStatus.className = "detect-status attack";
       $detectStatus.textContent = "ATTACK DETECTED";
@@ -2049,6 +2079,9 @@
       $detectStatus.textContent = "NORMAL";
       $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
     }
+
+    /* Clients connected */
+    if (d.clients !== undefined) { renderClients(d.clients); }
 
     /* Playback state */
     if (d.index !== undefined) {
