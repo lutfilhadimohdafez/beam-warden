@@ -381,6 +381,21 @@
   .clients-row .cmac { color: var(--accent); }
   .clients-row .cip { color: var(--muted); }
   .clients-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted-dim); padding: 4px 8px; }
+  .bfi-viz { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 8px 4px; }
+  .bfi-gauge { text-align: center; }
+  .bfi-gsvg { width: 108px; height: 70px; display: block; }
+  .bfi-arc { fill: none; stroke: var(--border-light); stroke-width: 6; stroke-linecap: round; }
+  .bfi-needle { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transform-origin: 60px 70px; transition: transform 0.4s cubic-bezier(.2,.7,.2,1); }
+  .bfi-hub { fill: var(--accent); }
+  .bfi-sym { font-family: var(--font-mono); font-size: 1.15rem; color: var(--accent); line-height: 1; margin-top: -6px; }
+  .bfi-gval { font-family: var(--font-mono); font-size: 0.92rem; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+  .bfi-grange { font-family: var(--font-mono); font-size: 0.5rem; color: var(--muted-dim); }
+  .bfi-bars { flex: 1; min-width: 170px; display: flex; flex-direction: column; gap: 6px; }
+  .bfi-bar { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.56rem; color: var(--muted); }
+  .bfi-bar-lbl { width: 108px; flex-shrink: 0; }
+  .bfi-bar-track { flex: 1; height: 6px; background: var(--panel-2); border: 1px solid var(--border); }
+  .bfi-bar-fill { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.4s ease; }
+  .bfi-bar-val { width: 46px; flex-shrink: 0; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
   .detect-score-wrap {
     display: flex;
     flex-direction: column;
@@ -1322,30 +1337,33 @@
         <div class="clients-empty">no clients (live mode only)</div>
       </div>
       <div class="section-label stagger" id="bfiSectionLabel">BFI / CSI STREAM</div>
-      <div class="tiles stagger" id="bfiPanel">
-        <div class="tile">
-          <div class="tile-label">Phi Mean</div>
-          <div class="tile-value" id="valBfiPhi">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">Psi Mean</div>
-          <div class="tile-value" id="valBfiPsi">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">Angle Var</div>
-          <div class="tile-value" id="valBfiAngleVar">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">SC Var</div>
-          <div class="tile-value" id="valBfiScVar">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">Phi Temporal</div>
-          <div class="tile-value" id="valBfiPhiTemp">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">Psi Temporal</div>
-          <div class="tile-value" id="valBfiPsiTemp">-</div>
+      <div class="stagger" id="bfiPanel">
+        <div class="bfi-viz">
+          <div class="bfi-gauge">
+            <svg viewBox="0 0 120 78" class="bfi-gsvg" aria-label="phi angle gauge">
+              <path d="M12 70 A48 48 0 0 1 108 70" class="bfi-arc"/>
+              <line x1="60" y1="70" x2="60" y2="26" class="bfi-needle" id="bfiPhiNeedle"/>
+              <circle cx="60" cy="70" r="4" class="bfi-hub"/>
+            </svg>
+            <div class="bfi-sym">&#966;</div>
+            <div class="bfi-gval" id="bfiPhiVal">&mdash;</div>
+            <div class="bfi-grange">&phi; &middot; 0&ndash;2 rad&times;&pi;</div>
+          </div>
+          <div class="bfi-gauge">
+            <svg viewBox="0 0 120 78" class="bfi-gsvg" aria-label="psi angle gauge">
+              <path d="M12 70 A48 48 0 0 1 108 70" class="bfi-arc"/>
+              <line x1="60" y1="70" x2="60" y2="26" class="bfi-needle" id="bfiPsiNeedle"/>
+              <circle cx="60" cy="70" r="4" class="bfi-hub"/>
+            </svg>
+            <div class="bfi-sym">&#968;</div>
+            <div class="bfi-gval" id="bfiPsiVal">&mdash;</div>
+            <div class="bfi-grange">&psi; &middot; 0&ndash;0.5 rad&times;&pi;</div>
+          </div>
+          <div class="bfi-bars">
+            <div class="bfi-bar"><span class="bfi-bar-lbl">CSI variance</span><span class="bfi-bar-track"><span class="bfi-bar-fill" id="bfiAngleBar"></span></span><span class="bfi-bar-val" id="bfiAngleVal">&mdash;</span></div>
+            <div class="bfi-bar"><span class="bfi-bar-lbl">multipath (SC var)</span><span class="bfi-bar-track"><span class="bfi-bar-fill" id="bfiScBar"></span></span><span class="bfi-bar-val" id="bfiScVal">&mdash;</span></div>
+            <div class="bfi-bar"><span class="bfi-bar-lbl">&phi; temporal</span><span class="bfi-bar-track"><span class="bfi-bar-fill" id="bfiPhiTBar"></span></span><span class="bfi-bar-val" id="bfiPhiTVal">&mdash;</span></div>
+          </div>
         </div>
       </div>
       <div class="bfi-locked" id="bfiLocked" style="display:none;">
@@ -1642,6 +1660,28 @@
       return '<div class="clients-row"><span class="cmac">' + c.mac +
         '</span><span class="cip">' + (c.ip || "—") + '</span></div>';
     }).join("");
+  }
+
+  /* ---- BFI / CSI visualization (phi/psi gauges + variance bars) ---- */
+  function _bfiText(id, txt) { var e = document.getElementById(id); if (e) e.textContent = txt; }
+  function _bfiNeedle(id, val, max) {
+    var e = document.getElementById(id); if (!e) return;
+    var v = Math.max(0, Math.min(max, val));
+    e.style.transform = "rotate(" + (-80 + (v / max) * 160) + "deg)";
+  }
+  function _bfiBar(barId, valId, val, max) {
+    var f = document.getElementById(barId), t = document.getElementById(valId);
+    if (f) f.style.width = Math.max(0, Math.min(100, (val / max) * 100)) + "%";
+    if (t) t.textContent = (val != null ? val.toFixed(4) : "—");
+  }
+  function renderBfiViz(d) {
+    _bfiNeedle("bfiPhiNeedle", d.bfi_phi_mean, 2.0);   /* phi in (0,2) */
+    _bfiNeedle("bfiPsiNeedle", d.bfi_psi_mean, 0.5);   /* psi in (0,0.5) */
+    _bfiText("bfiPhiVal", d.bfi_phi_mean.toFixed(3));
+    _bfiText("bfiPsiVal", d.bfi_psi_mean.toFixed(3));
+    _bfiBar("bfiAngleBar", "bfiAngleVal", d.bfi_angle_var, 0.6);
+    _bfiBar("bfiScBar", "bfiScVal", d.bfi_subcarrier_var, 0.2);
+    _bfiBar("bfiPhiTBar", "bfiPhiTVal", d.bfi_phi_temporal_var, 0.1);
   }
   var $valTxTput    = document.getElementById("valTxTput");
   var $valRetry     = document.getElementById("valRetry");
@@ -2024,18 +2064,7 @@
 
     /* BFI / CSI panel (only update if data present) */
     if (d.bfi_phi_mean !== null && d.bfi_phi_mean !== undefined) {
-      var $bfiPhi    = document.getElementById("valBfiPhi");
-      var $bfiPsi    = document.getElementById("valBfiPsi");
-      var $bfiAngle  = document.getElementById("valBfiAngleVar");
-      var $bfiSc     = document.getElementById("valBfiScVar");
-      var $bfiPhiT   = document.getElementById("valBfiPhiTemp");
-      var $bfiPsiT   = document.getElementById("valBfiPsiTemp");
-      $bfiPhi.textContent   = d.bfi_phi_mean.toFixed(4);
-      $bfiPsi.textContent   = d.bfi_psi_mean.toFixed(4);
-      $bfiAngle.textContent = d.bfi_angle_var.toFixed(4);
-      $bfiSc.textContent    = d.bfi_subcarrier_var.toFixed(4);
-      $bfiPhiT.textContent  = d.bfi_phi_temporal_var.toFixed(4);
-      $bfiPsiT.textContent  = d.bfi_psi_temporal_var.toFixed(4);
+      renderBfiViz(d);
     }
 
     if (d.tx_mcs !== null && d.tx_mcs !== undefined) {
