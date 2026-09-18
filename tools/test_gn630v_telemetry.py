@@ -18,9 +18,14 @@ class _FakeOnt:
 
 
 def test_read_iface_bytes():
-    # sysfs cat output on the AX3200, incl. the echoed shell prompt.
-    ont = _FakeOnt("2269645006\n49800197995\nroot@XiaoQiang:~# ")
-    assert read_iface_bytes(ont, "wl0") == (2269645006, 49800197995)
+    # REAL AX3200 output: the long command echo WRAPS mid-line and survives
+    # echo-stripping, and the iface name `wl0` contributes a stray "0". The
+    # BWTX=/BWRX= markers must still pull the true counters, not the wl0 "0"s.
+    # (Regression: a bare digit-findall returned (0, 0) here.)
+    wrapped = ("echo BWTX=$(cat /sys/class/net/wl0/statistics/tx_bytes) BWRX=$\n\n"
+               "(cat /sys/class/net/wl0/statistics/rx_bytes)\n"
+               "BWTX=328466335 BWRX=4486986\nroot@XiaoQiang:~#")
+    assert read_iface_bytes(_FakeOnt(wrapped), "wl0") == (328466335, 4486986)
     # unavailable / empty output -> (0, 0), never raises.
     assert read_iface_bytes(_FakeOnt(""), "wl0") == (0, 0)
 

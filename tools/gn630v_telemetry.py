@@ -131,19 +131,21 @@ def read_iface_bytes(ont, iface: str) -> tuple:
 
     The AX3200 (XiaoQiang) `iwpriv <if> stat` exposes NO byte counters, so the
     stat-based throughput reads 0. The kernel does keep them in sysfs — read
-    both in one telnet round-trip and grab the first two integers (the shell
-    echo/prompt is stripped by taking only the digits we asked cat to print).
+    both in one telnet round-trip, wrapped in a TX=/RX= marker so parsing can't
+    be fooled by the echoed command. (A bare findall-digits parse grabbed the
+    "0" from a digit-bearing iface name like `wl0` when the long command echo
+    wrapped and survived echo-stripping — returning (0, 0).)
     # ponytail: this is TOTAL-iface throughput (all traffic on the radio);
     #           per-station goodput would need iperf3 against a known victim.
     """
     try:
         out = ont.run(
-            f"cat /sys/class/net/{iface}/statistics/tx_bytes "
-            f"/sys/class/net/{iface}/statistics/rx_bytes"
+            f"echo BWTX=$(cat /sys/class/net/{iface}/statistics/tx_bytes) "
+            f"BWRX=$(cat /sys/class/net/{iface}/statistics/rx_bytes)"
         )
-        nums = re.findall(r"\d+", out)
-        if len(nums) >= 2:
-            return int(nums[0]), int(nums[1])
+        m = re.search(r"BWTX=(\d+)\s+BWRX=(\d+)", out)
+        if m:
+            return int(m.group(1)), int(m.group(2))
     except Exception:
         pass
     return 0, 0
