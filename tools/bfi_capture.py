@@ -295,10 +295,14 @@ def run_tshark_live(iface: str, duration: int, count: int,
     """Capture live on *iface* then parse.  Returns BfiFrame list."""
     # We capture into a temp pcap (or user-specified one), then analyse.
     tmp = write_pcap or "/tmp/bfi_live_capture.pcap"
+    # tshark refuses a display filter (-Y) while capturing to a file (-w):
+    # "Display filters aren't supported when capturing and saving." So we
+    # capture UNFILTERED here and let run_tshark_on_pcap(tmp) apply -Y on read.
+    # ponytail: unfiltered capture can be large on a busy channel — add a BPF
+    # capture filter (-f) if pcaps balloon; duration/count already bound it.
     cap_cmd = [
         TSHARK, "-i", iface,
         "-a", f"duration:{duration}",
-        "-Y", _get_display_filter(),
         "-w", tmp,
     ]
     if count > 0:
