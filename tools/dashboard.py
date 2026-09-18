@@ -55,11 +55,11 @@ _bfi_stop: threading.Event | None = None
 _monitor_setup_done = False  # True once /monitor-setup ran → shutdown should restore networking
 _monitor_iface = "mon0"      # the iface set to monitor, for teardown on shutdown
 _calibrated = False          # True once the model has been retrained for THIS environment this session
-_latest_clients: list = []   # connected clients (from brctl showmacs br0 on the live telnet)
+_latest_clients: list = []   # connected clients (from brctl showmacs br-lan on the live telnet)
 
 
 def _parse_clients(macs_text: str, arp_text: str) -> list:
-    """Parse `brctl showmacs br0` (non-local MACs = clients) + `/proc/net/arp` (IPs)."""
+    """Parse `brctl showmacs br-lan` (non-local MACs = clients) + `/proc/net/arp` (IPs)."""
     ip_by_mac = {}
     for line in arp_text.splitlines()[1:]:
         p = line.split()
@@ -314,7 +314,10 @@ async def _producer_live() -> None:
             client_ctr += 1
             if client_ctr == 1 or client_ctr % 7 == 0:
                 try:
-                    macs = await asyncio.to_thread(ont.run, "brctl showmacs br0")
+                    # ponytail: br-lan is XiaoQiang's LAN bridge (no br0 on this fw).
+                    # Shows all bridged clients (wired eth0 + wl0/wl1). For wl0-only
+                    # stations with per-chain RSSI, parse `iwpriv wl0 show stainfo`->dmesg.
+                    macs = await asyncio.to_thread(ont.run, "brctl showmacs br-lan")
                     arp = await asyncio.to_thread(ont.run, "cat /proc/net/arp")
                     global _latest_clients
                     _latest_clients = _parse_clients(macs, arp)
