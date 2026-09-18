@@ -26,11 +26,14 @@ TASK_REGISTRY: dict[str, dict] = {
             "iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
             "iw phy $PHY interface add {mon} type monitor; "
             "ip link set {mon} up; "
-            "iw dev {mon} set channel {channel}; "
-            "iw dev {mon} info | grep -E 'type|channel'",
+            # BW80 to match the AX3200 wl0 (validated in challenges G3:
+            # `set freq 5220 80 5210`). center80=5210 is fixed for the UNII-1
+            # block (ch36-48); primary = 5000 + ch*5. 20MHz missed HE frames.
+            "iw dev {mon} set freq $((5000 + {channel} * 5)) 80 5210; "
+            "iw dev {mon} info | grep -E 'type|channel|txpower'",
         ],
         "privileged": True,
-        "description": "Stop NetworkManager, create monitor interface, set channel.",
+        "description": "Stop NetworkManager, create monitor interface, set 80MHz freq (BW80).",
     },
     "scan_adapters": {
         "label": "Scan Adapters",
