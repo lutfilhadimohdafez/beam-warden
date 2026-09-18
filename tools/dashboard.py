@@ -686,6 +686,29 @@ async def _session_endpoint(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "source": source})
 
 
+async def _session_stop(request: Request) -> JSONResponse:
+    """POST /session-stop — disconnect the current session."""
+    global _current_task
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    # Cancel existing producer (ponytail: small copy, not worth abstracting)
+    if _current_task is not None and not _current_task.done():
+        _current_task.cancel()
+        try:
+            await _current_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _current_task = None
+    _stop_bfi()
+    PLAYBACK["rows"] = []
+    PLAYBACK["total"] = 0
+    PLAYBACK["attack_start"] = -1
+    PLAYBACK["idx"] = 0
+    PLAYBACK["paused"] = False
+    await _broadcast({"type": "session", "source": "none", "detail": "disconnected"})
+    return JSONResponse({"ok": True})
+
+
 # ── calibration helpers ───────────────────────────────────────────────────
 def _append_calib_csv(features: list[str], vec: list[float]) -> None:
     """Append a single calibration sample to data/normal_calib.csv."""
@@ -1287,6 +1310,7 @@ app = Starlette(
         Route("/tasks", _tasks_endpoint),
         Route("/replay-files", _replay_files_endpoint),
         Route("/session", _session_endpoint, methods=["POST"]),
+        Route("/session-stop", _session_stop, methods=["POST"]),
         Route("/run/{name}", _run_endpoint, methods=["POST"]),
         Route("/stop/{name}", _stop_endpoint, methods=["POST"]),
         Route("/model-status", _model_status),

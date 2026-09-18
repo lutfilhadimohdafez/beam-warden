@@ -339,6 +339,14 @@
   }
   .session-start-btn:hover { background: var(--ok); color: #0a0a0a; }
   .session-start-btn:active { transform: scale(0.97); }
+  /* FIX 2: BFI monitor field hint — absolute so input sits on same row as siblings */
+  #sessionBfiField span {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 2px;
+    white-space: nowrap;
+  }
   .session-status {
     font-family: var(--font-mono);
     font-size: 0.68rem;
@@ -782,6 +790,17 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-bright);
+  }
+  /* FIX 3a: mission-step number badge */
+  .mc-task-num {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    border: 1px solid var(--border-light);
+    padding: 0 5px;
+    line-height: 1.5;
+    flex-shrink: 0;
   }
   /* SQUARE FLAG CHIPS */
   .mc-chip {
@@ -1264,7 +1283,7 @@
           <label>Iface</label>
           <input id="sessionIface" value="rai1" placeholder="rai1">
         </div>
-        <div class="session-field">
+        <div class="session-field" id="sessionBfiField" style="position:relative;">
           <label>BFI monitor iface</label>
           <input id="sessionBfiIface" value="" placeholder="mon0">
           <span style="font-family:var(--font-mono);font-size:0.52rem;color:var(--muted-dim);margin-top:2px;">off-air CSI; needs monitor mode (Command Center → Setup Monitor)</span>
@@ -1394,7 +1413,7 @@
   <div class="tab-section" id="tab-command-center">
 
     <!-- MISSION CONTROL -->
-    <div class="section-label stagger">MISSION CONTROL</div>
+    <div class="section-label stagger">MISSION CONTROL <span id="mcMonStatus" style="font-family:var(--font-mono);font-size:0.56rem;font-weight:600;letter-spacing:0.04em;margin-left:8px;color:var(--muted-dim);"></span></div>
     <div class="mc-section stagger">
       <div class="mc-params">
         <div class="mc-param">
@@ -1735,6 +1754,7 @@
   var $sessionLiveConnect = document.getElementById("sessionLiveConnect");
   var $sessionStatus = document.getElementById("sessionStatus");
   var activeSessionMode = "live";
+  var liveConnected = false;  /* ponytail: 3-state connect button machine */
 
   function applySessionMode() {
     sessionModeBtns.forEach(function (b) {
@@ -1771,7 +1791,7 @@
 
   function postSession(body) {
     $sessionStatus.textContent = "Starting...";
-    fetch("/session", {
+    return fetch("/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1781,8 +1801,10 @@
       } else {
         $sessionStatus.textContent = "Session started: " + d.source;
       }
+      return d;
     }).catch(function (e) {
       $sessionStatus.textContent = "Fetch error: " + e;
+      throw e;
     });
   }
 
@@ -1793,15 +1815,60 @@
     postSession({ source: isPcap ? "pcap" : "replay", file: file });
   });
 
+  /* FIX 1: Connect button 3-state machine (idle → connecting → connected) */
+  function setLiveBtn(state) {
+    if (state === "connecting") {
+      $sessionLiveConnect.textContent = "Connecting\u2026";
+      $sessionLiveConnect.disabled = true;
+      $sessionLiveConnect.style.borderColor = "";
+      $sessionLiveConnect.style.color = "";
+    } else if (state === "connected") {
+      $sessionLiveConnect.textContent = "Disconnect";
+      $sessionLiveConnect.disabled = false;
+      $sessionLiveConnect.style.borderColor = "var(--danger)";
+      $sessionLiveConnect.style.color = "var(--danger)";
+    } else {
+      $sessionLiveConnect.textContent = "Connect";
+      $sessionLiveConnect.disabled = false;
+      $sessionLiveConnect.style.borderColor = "";
+      $sessionLiveConnect.style.color = "";
+    }
+  }
+
   $sessionLiveConnect.addEventListener("click", function () {
-    postSession({
-      source: "live",
-      host: document.getElementById("sessionHost").value.trim(),
-      user: document.getElementById("sessionUser").value.trim(),
-      password: document.getElementById("sessionPassword").value,
-      iface: document.getElementById("sessionIface").value.trim(),
-      bfi_iface: document.getElementById("sessionBfiIface").value.trim(),
-    });
+    if (liveConnected) {
+      /* Disconnect */
+      fetch("/session-stop", { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.ok) {
+            liveConnected = false;
+            setLiveBtn("idle");
+          }
+        }).catch(function () {});
+    } else {
+      /* Connect */
+      setLiveBtn("connecting");
+      postSession({
+        source: "live",
+        host: document.getElementById("sessionHost").value.trim(),
+        user: document.getElementById("sessionUser").value.trim(),
+        password: document.getElementById("sessionPassword").value,
+        iface: document.getElementById("sessionIface").value.trim(),
+        bfi_iface: document.getElementById("sessionBfiIface").value.trim(),
+      }).then(function (d) {
+        if (d && d.ok) {
+          liveConnected = true;
+          setLiveBtn("connected");
+        } else {
+          liveConnected = false;
+          setLiveBtn("idle");
+        }
+      }).catch(function () {
+        liveConnected = false;
+        setLiveBtn("idle");
+      });
+    }
   });
 
   /* ---- Status helpers ---- */
@@ -2031,6 +2098,11 @@
     }
     if (d.type === "session") {
       $sessionStatus.textContent = d.detail || d.source;
+      /* FIX 1: reset connect button when session ends (covers external disconnects) */
+      if (d.source === "none") {
+        liveConnected = false;
+        setLiveBtn("idle");
+      }
       rfFeedMode = d.source || "idle";
       rfFeedDetail = d.detail || "";
       rfUpdateTitle();
@@ -2217,6 +2289,12 @@
     };
   }
 
+  /* FIX 3a: explicit mission sequence order */
+  var TASK_ORDER = [
+    "setup_monitor", "scan_adapters", "capture_bfi", "start_attack",
+    "decode_features", "train_detector", "gen_synthetic", "test_echo"
+  ];
+
   function buildGrid(tasks) {
     $mcGrid.innerHTML = "";
     var names = Object.keys(tasks);
@@ -2224,14 +2302,25 @@
       $mcGrid.innerHTML = '<div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">No tasks registered.</div>';
       return;
     }
-    names.forEach(function (name) {
+    /* Sort: defined order first, then any extras at the end */
+    var sorted = names.slice().sort(function (a, b) {
+      var ia = TASK_ORDER.indexOf(a), ib = TASK_ORDER.indexOf(b);
+      if (ia < 0) ia = 999; if (ib < 0) ib = 999;
+      return ia - ib || a.localeCompare(b);
+    });
+    sorted.forEach(function (name, idx) {
       var t = tasks[name];
+      var stepNum = TASK_ORDER.indexOf(name) >= 0 ? TASK_ORDER.indexOf(name) + 1 : idx + 1;
       var card = document.createElement("div");
       card.className = "mc-task";
       card.setAttribute("data-task", name);
 
       var header = document.createElement("div");
       header.className = "mc-task-header";
+
+      var num = document.createElement("span");
+      num.className = "mc-task-num";
+      num.textContent = stepNum;
 
       var label = document.createElement("div");
       label.className = "mc-task-label";
@@ -2242,6 +2331,7 @@
       chip.id = "chip-" + name;
       chip.textContent = t.state || "idle";
 
+      header.appendChild(num);
       header.appendChild(label);
       header.appendChild(chip);
 
@@ -2933,6 +3023,52 @@
 
   checkMonitorGate();
   setInterval(checkMonitorGate, 5000);
+
+  /* FIX 3b: live monitor status badge + setup_monitor chip sync */
+  var $mcMonStatus = document.getElementById("mcMonStatus");
+  var $mcMon = document.getElementById("mcMon");
+
+  function checkMonitorStatus() {
+    var iface = ($mcMon && $mcMon.value.trim()) || "mon0";
+    fetch("/monitor-status?iface=" + encodeURIComponent(iface))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!$mcMonStatus) return;
+        if (d && d.is_monitor) {
+          $mcMonStatus.textContent = "MONITOR " + iface + " CONNECTED";
+          $mcMonStatus.style.color = "var(--ok)";
+          /* Update setup_monitor chip to green if not actively running */
+          var chip = document.getElementById("chip-setup_monitor");
+          if (chip && !chip.classList.contains("running")) {
+            updateChip("setup_monitor", "connected");
+          }
+        } else {
+          $mcMonStatus.textContent = "MONITOR " + iface + " DOWN";
+          $mcMonStatus.style.color = "var(--muted-dim)";
+          /* Revert setup_monitor chip to idle if not running */
+          var chip = document.getElementById("chip-setup_monitor");
+          if (chip && !chip.classList.contains("running")) {
+            updateChip("setup_monitor", "idle");
+          }
+        }
+      })
+      .catch(function () {});
+  }
+
+  /* ponytail: .mc-chip.connected mirrors .mc-chip.done but labeled "connected" */
+  /* (added via inline style injection so we don't touch the stylesheet block) */
+  (function () {
+    var s = document.createElement("style");
+    s.textContent = ".mc-chip.connected { background: var(--ok-dim); color: var(--ok); border: 1px solid rgba(61,214,128,0.25); }";
+    document.head.appendChild(s);
+  })();
+
+  checkMonitorStatus();
+  setInterval(checkMonitorStatus, 5000);
+  if ($mcMon) {
+    $mcMon.addEventListener("change", checkMonitorStatus);
+    $mcMon.addEventListener("input", checkMonitorStatus);
+  }
 })();
 </script>
 </body>
