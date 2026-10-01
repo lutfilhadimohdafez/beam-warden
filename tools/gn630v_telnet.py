@@ -81,6 +81,17 @@ class GN630V:
         time.sleep(0.2)
         self.sock.sendall(b'echo MZ""QEND\r\n')
         out = _recv_until(self.sock, [b"MZQEND"], timeout).decode("utf-8", "replace")
+        if "MZQEND" not in out:
+            # The end marker always round-trips on a live session. Its absence
+            # means the link dropped or the session hung — a half-open TCP sends
+            # no RST, so sendall buffers and recv just times out with no error.
+            # Raise so callers surface a disconnect instead of silently parsing
+            # empty output as healthy "ok" data (the dashboard-freeze bug).
+            # ponytail: detection latency = this timeout (default 12s); lower it
+            #           per-call if you need a faster disconnect signal.
+            raise ConnectionError(
+                f"router unresponsive (no reply to '{cmd}' within {timeout}s) — link down?"
+            )
         lines = [
             l for l in out.splitlines()
             if l.strip() not in (cmd.strip(), 'echo MZ""QEND', "MZQEND")
