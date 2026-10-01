@@ -44,7 +44,7 @@ TASK_REGISTRY: dict[str, dict] = {
     "capture_bfi": {
         "label": "Capture BFI",
         "cmd": [
-            "tshark", "-i", "{mon}", "-w",
+            "tshark", "-i", "{mon}", "-p", "-w",
             str(_ROOT / "results" / "sessions" / "{run}_air.pcap"),
         ],
         "privileged": False,  # dumpcap has cap_net_raw; user in wireshark group. pkexec/root breaks the file write.

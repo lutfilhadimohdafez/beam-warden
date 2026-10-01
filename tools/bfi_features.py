@@ -338,6 +338,8 @@ def stream_features(
 
             cmd = [
                 "tshark", "-i", iface,
+                "-p",  # no promisc: redundant in monitor mode, and the per-burst
+                       # toggle spams dmesg "entered/left promiscuous mode"
                 "-w", tmp_path,
                 "-a", f"duration:{burst}",
             ]

@@ -302,6 +302,7 @@ def run_tshark_live(iface: str, duration: int, count: int,
     # capture filter (-f) if pcaps balloon; duration/count already bound it.
     cap_cmd = [
         TSHARK, "-i", iface,
+        "-p",  # no promisc: redundant in monitor mode, avoids dmesg toggle spam
         "-a", f"duration:{duration}",
         "-w", tmp,
     ]
@@ -547,7 +548,7 @@ def scan_victims(iface: str = "mon0", duration: int = 6) -> List[dict]:
     """
     duration = max(2, min(int(duration), 30))
     cmd = [
-        TSHARK, "-i", iface, "-a", f"duration:{duration}",
+        TSHARK, "-i", iface, "-p", "-a", f"duration:{duration}",
         "-Y", "wlan.fixed.category_code==30",
         "-T", "fields",
         "-e", "wlan.sa", "-e", "wlan.ra", "-e", "wlan_radio.signal_dbm",
