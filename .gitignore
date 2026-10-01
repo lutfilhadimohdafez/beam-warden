@@ -14,3 +14,6 @@ results/sessions/
 # raw off-air captures (huge) — commit only curated datasets
 data/*.pcapng
 data/bfi_*_2026*.pcap
+
+# local router creds (never commit — plaintext passwords)
+tools/routers.local.json

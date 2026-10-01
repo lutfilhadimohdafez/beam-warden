@@ -1271,20 +1271,24 @@
       </div>
       <div class="session-fields" id="sessionLiveFields" style="display:none;">
         <div class="session-field">
+          <label>Router Profile</label>
+          <select id="sessionProfile"></select>
+        </div>
+        <div class="session-field">
           <label>Host</label>
-          <input id="sessionHost" value="192.168.0.1" placeholder="192.168.0.1">
+          <input id="sessionHost" value="192.168.31.1" placeholder="192.168.31.1">
         </div>
         <div class="session-field">
           <label>User</label>
-          <input id="sessionUser" value="tmadmin" placeholder="tmadmin">
+          <input id="sessionUser" value="root" placeholder="root">
         </div>
         <div class="session-field">
           <label>Password</label>
-          <input id="sessionPassword" type="password" value="REDACTED" placeholder="password">
+          <input id="sessionPassword" type="password" value="" placeholder="password (from profile)">
         </div>
         <div class="session-field">
           <label>Iface</label>
-          <input id="sessionIface" value="rai1" placeholder="rai1">
+          <input id="sessionIface" value="wl0" placeholder="wl0">
         </div>
         <div class="session-field" id="sessionBfiField" style="position:relative;">
           <label>BFI monitor iface</label>
@@ -1782,6 +1786,38 @@
   var $sessionStatus = document.getElementById("sessionStatus");
   var activeSessionMode = "live";
   var liveConnected = false;  /* ponytail: 3-state connect button machine */
+
+  /* ---- Router profiles: pick instead of memorizing creds ---- */
+  /* creds come from /router-profiles (gitignored routers.local.json) — never baked into this page */
+  var ROUTER_PROFILES = [];
+  var $sessionProfile = document.getElementById("sessionProfile");
+  function applyProfile(p) {
+    if (!p) return;  /* "custom" → leave fields as-is for manual entry */
+    document.getElementById("sessionHost").value = p.host || "";
+    document.getElementById("sessionUser").value = p.user || "";
+    document.getElementById("sessionPassword").value = p.password || "";
+    document.getElementById("sessionIface").value = p.iface || "";
+    var bfi = document.getElementById("sessionBfiIface");
+    if (bfi && p.bfi) bfi.value = p.bfi;
+  }
+  if ($sessionProfile) {
+    fetch("/router-profiles").then(function (r) { return r.json(); }).then(function (d) {
+      ROUTER_PROFILES = d.profiles || [];
+      ROUTER_PROFILES.forEach(function (p, i) {
+        var o = document.createElement("option");
+        o.value = String(i); o.textContent = p.name || ("Router " + (i + 1));
+        $sessionProfile.appendChild(o);
+      });
+      var oc = document.createElement("option");
+      oc.value = "custom"; oc.textContent = "Custom…";
+      $sessionProfile.appendChild(oc);
+      $sessionProfile.addEventListener("change", function () {
+        if (this.value === "custom") return;
+        applyProfile(ROUTER_PROFILES[parseInt(this.value, 10)]);
+      });
+      if (ROUTER_PROFILES.length) applyProfile(ROUTER_PROFILES[0]);  /* default to first */
+    }).catch(function () { /* no profiles endpoint → manual entry */ });
+  }
 
   function applySessionMode() {
     sessionModeBtns.forEach(function (b) {

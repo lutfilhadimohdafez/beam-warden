@@ -1115,6 +1115,27 @@ async def _bfi_start(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "iface": iface})
 
 
+# ── router profiles (creds loaded from a gitignored local file) ────────────
+async def _router_profiles(request: Request) -> JSONResponse:
+    """GET /router-profiles — saved router presets for the connect panel.
+
+    Reads tools/routers.local.json (gitignored, holds plaintext passwords);
+    falls back to routers.example.json so a fresh clone still shows the format.
+    Localhost-only — creds never leave this machine.
+    """
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    path = _HERE / "routers.local.json"
+    if not path.exists():
+        path = _HERE / "routers.example.json"
+    try:
+        data = json.loads(path.read_text())
+        profiles = data.get("profiles", [])
+    except Exception:
+        profiles = []
+    return JSONResponse({"profiles": profiles, "source": path.name})
+
+
 # ── victim scan (air-side; passive, no network membership needed) ──────────
 async def _scan_victims(request: Request) -> JSONResponse:
     """POST /scan-victims {iface, duration} — sniff the air for BFI senders.
@@ -1355,6 +1376,7 @@ app = Starlette(
         Route("/monitor-setup", _monitor_setup, methods=["POST"]),
         Route("/bfi-start", _bfi_start, methods=["POST"]),
         Route("/scan-victims", _scan_victims, methods=["POST"]),
+        Route("/router-profiles", _router_profiles),
         Route("/shutdown", _shutdown, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
