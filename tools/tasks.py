@@ -47,6 +47,25 @@ TASK_REGISTRY: dict[str, dict] = {
         "privileged": True,
         "description": "Create monitor iface if missing + set channel at the chosen bandwidth (idempotent).",
     },
+    "reset_monitor": {
+        "label": "Reset Monitor",
+        "cmd": [
+            "sh", "-c",
+            # inverse of setup_monitor: tear down the monitor iface and hand the
+            # Alfa back to managed WiFi + NetworkManager. ponytail: detect the
+            # mt7921u phy (it re-enumerates after a modprobe reload), never hardcode phy0.
+            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+            "iw dev {mon} del 2>/dev/null; "
+            "iw dev wlan1 del 2>/dev/null; "
+            "iw phy $PHY interface add wlan1 type managed 2>/dev/null; "
+            "nmcli device set wlan1 managed yes 2>/dev/null; "
+            "ip link set wlan1 up 2>/dev/null; "
+            "iw dev wlan1 info | grep -E 'Interface|type'",
+        ],
+        "privileged": True,
+        "description": "Tear down the monitor iface and restore wlan1 to managed WiFi + NetworkManager (inverse of Setup Monitor).",
+    },
     "scan_adapters": {
         "label": "Scan Adapters",
         "cmd": ["iw", "dev"],
