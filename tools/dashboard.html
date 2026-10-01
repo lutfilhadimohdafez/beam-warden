@@ -1432,8 +1432,12 @@
           <input id="mcChannel" value="44" placeholder="44">
         </div>
         <div class="mc-param">
-          <label>AP BSSID</label>
+          <label>AP BSSID
+            <button type="button" id="mcScanAps"
+              style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan AP</button>
+          </label>
           <input id="mcAp" value="5c:02:14:b0:34:13" placeholder="5c:02:14:b0:34:13">
+          <select id="mcApList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
         </div>
         <div class="mc-param">
           <label>Victim MAC
@@ -2352,18 +2356,61 @@
     };
   }
 
+  /* ---- AP air-scan (passive beacon scan on the monitored channel) ---- */
+  var $mcScanAps = document.getElementById("mcScanAps");
+  var $mcApList  = document.getElementById("mcApList");
+  if ($mcScanAps) {
+    $mcScanAps.addEventListener("click", function () {
+      var iface = document.getElementById("mcMon").value.trim() || "mon0";
+      $mcScanAps.disabled = true;
+      $mcScanAps.textContent = "scanning…";
+      fetch("/scan-aps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ iface: iface, duration: 6 }),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        $mcScanAps.disabled = false;
+        $mcScanAps.textContent = "scan AP";
+        if (!d.ok) { alert("AP scan failed: " + (d.error || "unknown")); return; }
+        var aps = d.aps || [];
+        if (aps.length === 0) {
+          $mcApList.style.display = "none";
+          alert("No beacons in 6s. Is " + iface + " in monitor mode on the AP's channel?");
+          return;
+        }
+        $mcApList.innerHTML = '<option value="">— pick AP (' + aps.length + ' on this channel) —</option>';
+        aps.forEach(function (a) {
+          var o = document.createElement("option");
+          o.value = a.bssid;
+          o.textContent = (a.ssid || "(hidden)") + "  ·  " + a.bssid +
+            (a.rssi != null ? "  ·  " + a.rssi + " dBm" : "");
+          $mcApList.appendChild(o);
+        });
+        $mcApList.style.display = "block";
+      }).catch(function (e) {
+        $mcScanAps.disabled = false;
+        $mcScanAps.textContent = "scan AP";
+        alert("AP scan error: " + e);
+      });
+    });
+    $mcApList.addEventListener("change", function () {
+      if (this.value) document.getElementById("mcAp").value = this.value;
+    });
+  }
+
   /* ---- Victim air-scan (passive; monitor mode, no network needed) ---- */
   var $mcScanVictims = document.getElementById("mcScanVictims");
   var $mcVictimList  = document.getElementById("mcVictimList");
   if ($mcScanVictims) {
     $mcScanVictims.addEventListener("click", function () {
       var iface = document.getElementById("mcMon").value.trim() || "mon0";
+      var ap = document.getElementById("mcAp").value.trim();  /* filter to target AP */
       $mcScanVictims.disabled = true;
       $mcScanVictims.textContent = "scanning…";
       fetch("/scan-victims", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ iface: iface, duration: 6 }),
+        body: JSON.stringify({ iface: iface, duration: 6, ap: ap }),
       }).then(function (r) { return r.json(); }).then(function (d) {
         $mcScanVictims.disabled = false;
         $mcScanVictims.textContent = "scan air";
@@ -2371,11 +2418,14 @@
         var vs = d.victims || [];
         if (vs.length === 0) {
           $mcVictimList.style.display = "none";
-          alert("No BFI senders in 6s. Victim pulling download on the attacked channel? " +
-                iface + " in monitor mode on the right channel?");
+          alert("No BFI senders" + (d.ap ? " for AP " + d.ap : "") + " in 6s.\n" +
+                "- victim pulling download on the attacked channel?\n" +
+                "- " + iface + " in monitor mode on the right channel?\n" +
+                "- clear the AP field to scan all APs on this channel.");
           return;
         }
-        $mcVictimList.innerHTML = '<option value="">— pick victim (' + vs.length + ' seen) —</option>';
+        $mcVictimList.innerHTML = '<option value="">— pick victim (' + vs.length +
+          (d.ap ? " on AP " + d.ap : "") + ') —</option>';
         vs.forEach(function (v) {
           var o = document.createElement("option");
           o.value = v.mac;

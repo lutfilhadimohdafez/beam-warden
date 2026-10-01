@@ -35,7 +35,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket
 
 from tasks import TASK_REGISTRY, resolve_cmd
-from bfi_capture import scan_victims
+from bfi_capture import scan_victims, scan_aps
 
 # ── module-level state read by the app ────────────────────────────────────
 args: argparse.Namespace  # set in __main__ before uvicorn.run
@@ -1160,11 +1160,37 @@ async def _scan_victims(request: Request) -> JSONResponse:
         duration = int(body.get("duration", 6))
     except (TypeError, ValueError):
         duration = 6
+    ap_filter = (body.get("ap") or "").strip() or None
     try:
-        victims = await asyncio.to_thread(scan_victims, iface, duration)
+        victims = await asyncio.to_thread(scan_victims, iface, duration, ap_filter)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-    return JSONResponse({"ok": True, "iface": iface, "victims": victims})
+    return JSONResponse({"ok": True, "iface": iface, "ap": ap_filter, "victims": victims})
+
+
+# ── AP scan (air-side; beacons on the monitored channel) ───────────────────
+async def _scan_aps(request: Request) -> JSONResponse:
+    """POST /scan-aps {iface, duration} — sniff beacons for nearby APs.
+
+    Passive beacon scan on the monitor iface's channel; no association needed.
+    Pick one to target, then the victim scan filters to its clients.
+    """
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    iface = body.get("iface") or _monitor_iface or "mon0"
+    try:
+        duration = int(body.get("duration", 6))
+    except (TypeError, ValueError):
+        duration = 6
+    try:
+        aps = await asyncio.to_thread(scan_aps, iface, duration)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True, "iface": iface, "aps": aps})
 
 
 async def _find_monitor_ifaces() -> list[str]:
@@ -1381,6 +1407,7 @@ app = Starlette(
         Route("/monitor-setup", _monitor_setup, methods=["POST"]),
         Route("/bfi-start", _bfi_start, methods=["POST"]),
         Route("/scan-victims", _scan_victims, methods=["POST"]),
+        Route("/scan-aps", _scan_aps, methods=["POST"]),
         Route("/router-profiles", _router_profiles),
         Route("/shutdown", _shutdown, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),

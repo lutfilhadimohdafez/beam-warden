@@ -205,3 +205,50 @@ def test_aggregate_victims():
     assert top["rssi"] == -39          # max (least-negative) kept
     assert top["ap"] == "5c:02:14:b0:34:13"
     print("test_aggregate_victims OK")
+
+
+def test_aggregate_victims_ap_filter():
+    """ap_filter keeps only victims feeding the target AP."""
+    from bfi_capture import aggregate_victims
+    text = "\n".join([
+        "aa:aa:aa:aa:aa:aa\t5c:02:14:b0:34:13\t-40",   # our AP
+        "bb:bb:bb:bb:bb:bb\t11:22:33:44:55:66\t-50",   # someone else's AP
+        "aa:aa:aa:aa:aa:aa\t5c:02:14:b0:34:13\t-42",
+    ])
+    vs = aggregate_victims(text, ap_filter="5C:02:14:B0:34:13")  # case-insensitive
+    assert len(vs) == 1, vs
+    assert vs[0]["mac"] == "aa:aa:aa:aa:aa:aa"
+    assert vs[0]["frames"] == 2
+    # no filter → both victims
+    assert len(aggregate_victims(text)) == 2
+    print("test_aggregate_victims_ap_filter OK")
+
+
+def test_aggregate_aps():
+    """aggregate_aps: dedup by BSSID, keep SSID + best RSSI, sort by signal."""
+    from bfi_capture import aggregate_aps
+    text = "\n".join([
+        "5c:02:14:b0:34:13\tXiaomi_115B_5G\t-45",
+        "5c:02:14:b0:34:13\tXiaomi_115B_5G\t-43",   # same AP, better RSSI
+        "aa:bb:cc:dd:ee:ff\tNeighborNet\t-70",
+        "ff:ff:ff:ff:ff:ff\t\t",                     # broadcast → ignored
+    ])
+    aps = aggregate_aps(text)
+    assert len(aps) == 2, aps
+    assert aps[0]["bssid"] == "5c:02:14:b0:34:13"   # strongest first
+    assert aps[0]["ssid"] == "Xiaomi_115B_5G"
+    assert aps[0]["rssi"] == -43
+    assert aps[0]["beacons"] == 2
+    print("test_aggregate_aps OK")
+
+
+def test_decode_ssid():
+    """SSID hex-decoding (tshark emits wlan.ssid as hex); hidden → empty."""
+    from bfi_capture import _decode_ssid, aggregate_aps
+    assert _decode_ssid("4b696e67486f6d6536335f3547") == "KingHome63_5G"
+    assert _decode_ssid("<MISSING>") == ""
+    assert _decode_ssid("") == ""
+    # a real beacon line with a hex SSID decodes in aggregate_aps
+    aps = aggregate_aps("5c:02:14:b0:34:13\t58696f6d695f354713\t-40")
+    assert aps[0]["ssid"] == bytes.fromhex("58696f6d695f354713").decode("utf-8", "replace")
+    print("test_decode_ssid OK")
