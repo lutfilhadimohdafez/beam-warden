@@ -89,6 +89,10 @@ def test_run_echo_streams_to_websocket():
                     if msg.get("type") == "log":
                         log_msgs.append(msg)
                     elif msg.get("type") == "status":
+                        # a "running" status now fires at task start; wait for the
+                        # terminal (done/failed) one.
+                        if msg.get("state") == "running":
+                            continue
                         status_msg = msg
                         break
                 except Exception:

@@ -20,20 +20,27 @@ TASK_REGISTRY: dict[str, dict] = {
         "label": "Setup Monitor Mode",
         "cmd": [
             "sh", "-c",
-            "nmcli device set wlan1 managed no; "
-            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
-            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
-            "iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
-            "iw phy $PHY interface add {mon} type monitor; "
-            "ip link set {mon} up; "
+            # idempotent: only build the monitor iface when it is NOT already up.
+            # Re-running while it exists used to tear it down (killing the live
+            # BFI capture / a running attack) and error with "resource busy" /
+            # "already exists". Now we just re-set the channel on the existing one.
+            "if ! iw dev {mon} info 2>/dev/null | grep -q 'type monitor'; then "
+            "  nmcli device set wlan1 managed no; "
+            "  PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "  [ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+            "  iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
+            "  iw phy $PHY interface add {mon} type monitor; "
+            "  ip link set {mon} up; "
+            "fi; "
             # BW80 to match the AX3200 wl0 (validated in challenges G3:
             # `set freq 5220 80 5210`). center80=5210 is fixed for the UNII-1
             # block (ch36-48); primary = 5000 + ch*5. 20MHz missed HE frames.
-            "iw dev {mon} set freq $((5000 + {channel} * 5)) 80 5210; "
+            # May fail 'busy' while tshark holds the iface — fine, freq is set.
+            "iw dev {mon} set freq $((5000 + {channel} * 5)) 80 5210 2>/dev/null; "
             "iw dev {mon} info | grep -E 'type|channel|txpower'",
         ],
         "privileged": True,
-        "description": "Stop NetworkManager, create monitor interface, set 80MHz freq (BW80).",
+        "description": "Create monitor interface if missing + set 80MHz channel (idempotent).",
     },
     "scan_adapters": {
         "label": "Scan Adapters",

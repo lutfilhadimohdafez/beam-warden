@@ -510,6 +510,11 @@ async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
     else:
         proc_cmd = cmd
 
+    # tell the UI the task is running NOW (not only on completion) so the chip
+    # turns running and the Stop button enables — otherwise a running task can
+    # never be stopped from the browser.
+    await _broadcast({"type": "status", "task": name, "state": "running", "code": None})
+
     proc = await asyncio.create_subprocess_exec(
         *proc_cmd,
         stdout=asyncio.subprocess.PIPE,
