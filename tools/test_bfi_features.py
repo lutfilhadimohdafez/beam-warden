@@ -184,3 +184,24 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_aggregate_victims():
+    """aggregate_victims: dedup by sender, count frames, keep best RSSI + AP."""
+    from bfi_capture import aggregate_victims
+    # tshark -T fields output: wlan.sa \t wlan.ra \t signal_dbm
+    text = "\n".join([
+        "f2:04:5a:30:bb:8f\t5c:02:14:b0:34:13\t-41",
+        "f2:04:5a:30:bb:8f\t5c:02:14:b0:34:13\t-39",   # same victim, better RSSI
+        "aa:bb:cc:dd:ee:ff\t5c:02:14:b0:34:13\t-70",
+        "ff:ff:ff:ff:ff:ff\t\t",                       # broadcast → ignored
+        "\t\t",                                          # empty → ignored
+    ])
+    vs = aggregate_victims(text)
+    assert len(vs) == 2, vs
+    top = vs[0]  # sorted by frames desc
+    assert top["mac"] == "f2:04:5a:30:bb:8f"
+    assert top["frames"] == 2
+    assert top["rssi"] == -39          # max (least-negative) kept
+    assert top["ap"] == "5c:02:14:b0:34:13"
+    print("test_aggregate_victims OK")

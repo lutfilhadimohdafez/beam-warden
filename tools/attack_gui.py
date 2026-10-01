@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import scrolledtext
 
+from bfi_capture import scan_victims
+
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 BINARY = "/home/lutfil/fyp/BeamCraft_AE/main_su"
 
@@ -113,6 +115,13 @@ class App(tk.Tk):
             e = tk.Entry(grid, textvariable=var, font=("Consolas", 9), bg=entry_bg, fg="white",
                          insertbackground="white", relief="flat", width=28)
             e.grid(row=i, column=1, sticky="w", pady=1)
+            if key == "victim":
+                # air-side victim discovery (passive; needs monitor mode, no network)
+                self.btn_scan_victims = tk.Button(
+                    grid, text="scan air", font=("Consolas", 8), bg="#333", fg=fg,
+                    activebackground="#444", relief="flat", padx=8, pady=1,
+                    command=self._scan_victims)
+                self.btn_scan_victims.grid(row=i, column=2, sticky="w", padx=(6, 0))
 
         tk.Label(cfg, text="Alpha 1.0 = max disruption, 0 = off",
                  font=("Consolas", 8), bg=bg, fg="#999").pack(anchor="w", pady=(6, 0))
@@ -236,6 +245,53 @@ class App(tk.Tk):
                 out = str(exc)
             self.after(0, lambda: self.println(out.strip()))
         threading.Thread(target=_worker, daemon=True).start()
+
+    # ----------------------------------------------------- Victim air-scan
+    def _scan_victims(self):
+        """Sniff the air (monitor mode, no network) for BFI senders = victims."""
+        iface = self._cfg("iface") or "mon0"
+        self.btn_scan_victims.configure(state="disabled", text="scanning…")
+        self.println(f"Scanning {iface} for BFI senders (6s)…")
+
+        def _worker():
+            try:
+                victims = scan_victims(iface, 6)
+                err = None
+            except Exception as exc:
+                victims, err = [], str(exc)
+            self.after(0, lambda: self._scan_victims_done(victims, err))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _scan_victims_done(self, victims, err):
+        self.btn_scan_victims.configure(state="normal", text="scan air")
+        if err:
+            self.println(f"[scan] failed: {err}")
+            return
+        if not victims:
+            self.println("[scan] no BFI senders seen — is a victim pulling "
+                         "download on the attacked channel? is the iface monitor-mode?")
+            return
+        self.println(f"[scan] {len(victims)} victim(s) emitting BFI:")
+        menu = tk.Menu(self, tearoff=0)
+        for v in victims:
+            rssi = f" · {v['rssi']} dBm" if v.get("rssi") is not None else ""
+            ap = f" → AP {v['ap']}" if v.get("ap") else ""
+            label = f"{v['mac']} · {v['frames']} BFI{rssi}{ap}"
+            self.println("  " + label)
+            menu.add_command(
+                label=label,
+                command=lambda vv=v: self._pick_victim(vv))
+        # drop the menu under the scan button
+        x = self.btn_scan_victims.winfo_rootx()
+        y = self.btn_scan_victims.winfo_rooty() + self.btn_scan_victims.winfo_height()
+        menu.tk_popup(x, y)
+
+    def _pick_victim(self, v):
+        self.cfg_vars["victim"].set(v["mac"])
+        if v.get("ap"):
+            self.cfg_vars["ap"].set(v["ap"])
+        self.println(f"[scan] target set → victim {v['mac']}"
+                     + (f", AP {v['ap']}" if v.get("ap") else ""))
 
     # -------------------------------------------------------- Monitor mode
     def _setup_monitor(self):

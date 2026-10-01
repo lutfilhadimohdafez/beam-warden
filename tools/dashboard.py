@@ -35,6 +35,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket
 
 from tasks import TASK_REGISTRY, resolve_cmd
+from bfi_capture import scan_victims
 
 # ── module-level state read by the app ────────────────────────────────────
 args: argparse.Namespace  # set in __main__ before uvicorn.run
@@ -1114,6 +1115,32 @@ async def _bfi_start(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "iface": iface})
 
 
+# ── victim scan (air-side; passive, no network membership needed) ──────────
+async def _scan_victims(request: Request) -> JSONResponse:
+    """POST /scan-victims {iface, duration} — sniff the air for BFI senders.
+
+    Lists devices emitting HE compressed-beamforming reports = the only
+    attackable victims. Needs the iface in monitor mode; needs NO association
+    or router creds. Shares bfi_capture.scan_victims with the Tkinter GUI.
+    """
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    iface = body.get("iface") or _monitor_iface or "mon0"
+    try:
+        duration = int(body.get("duration", 6))
+    except (TypeError, ValueError):
+        duration = 6
+    try:
+        victims = await asyncio.to_thread(scan_victims, iface, duration)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True, "iface": iface, "victims": victims})
+
+
 async def _find_monitor_ifaces() -> list[str]:
     """Return all interfaces currently in monitor mode (parsed from `iw dev`)."""
     try:
@@ -1327,6 +1354,7 @@ app = Starlette(
         Route("/monitor-status", _monitor_status),
         Route("/monitor-setup", _monitor_setup, methods=["POST"]),
         Route("/bfi-start", _bfi_start, methods=["POST"]),
+        Route("/scan-victims", _scan_victims, methods=["POST"]),
         Route("/shutdown", _shutdown, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(_HERE / "static"))),
         WebSocketRoute("/ws", _ws_handler),
