@@ -523,20 +523,24 @@ def aggregate_victims(text: str, ap_filter: str = None) -> List[dict]:
     Returns [{mac, ap, frames, rssi}] sorted by frame count desc.
     """
     ap_filter = (ap_filter or "").strip().lower() or None
+    cat_mode = {"30": "HE", "21": "VHT"}
     seen: dict[str, dict] = {}
     for line in text.splitlines():
         parts = line.split("\t")
         sa = (parts[0] if len(parts) > 0 else "").strip().lower()
         ra = (parts[1] if len(parts) > 1 else "").strip().lower()
         sig = (parts[2] if len(parts) > 2 else "").strip()
+        cat = (parts[3] if len(parts) > 3 else "").strip()
         if not sa or sa == "ff:ff:ff:ff:ff:ff":
             continue
         if ap_filter and ra != ap_filter:
             continue  # BFI for a different AP → not our target wlan
-        v = seen.setdefault(sa, {"mac": sa, "ap": ra, "frames": 0, "rssi": None})
+        v = seen.setdefault(sa, {"mac": sa, "ap": ra, "frames": 0, "rssi": None, "mode": None})
         v["frames"] += 1
         if ra and not v["ap"]:
             v["ap"] = ra
+        if cat and not v["mode"]:
+            v["mode"] = cat_mode.get(cat, cat)  # HE (cat30) or VHT (cat21)
         try:
             r = int(float(sig.split(",")[0]))  # radiotap may list per-chain; take first
             v["rssi"] = r if v["rssi"] is None else max(v["rssi"], r)
@@ -555,9 +559,11 @@ def scan_victims(iface: str = "mon0", duration: int = 6, ap_filter: str = None) 
     duration = max(2, min(int(duration), 30))
     cmd = [
         TSHARK, "-i", iface, "-p", "-a", f"duration:{duration}",
-        "-Y", "wlan.fixed.category_code==30",
+        # category 30 = HE (802.11ax) BFI, 21 = VHT (802.11ac) BFI — catch both
+        "-Y", "wlan.fixed.category_code==30 || wlan.fixed.category_code==21",
         "-T", "fields",
         "-e", "wlan.sa", "-e", "wlan.ra", "-e", "wlan_radio.signal_dbm",
+        "-e", "wlan.fixed.category_code",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
     if proc.returncode != 0:

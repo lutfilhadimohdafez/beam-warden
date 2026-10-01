@@ -1429,7 +1429,15 @@
         </div>
         <div class="mc-param">
           <label>Channel</label>
-          <input id="mcChannel" value="44" placeholder="44">
+          <input id="mcChannel" value="36" placeholder="36">
+        </div>
+        <div class="mc-param">
+          <label>Bandwidth</label>
+          <select id="mcBw" style="width:100%;">
+            <option value="80">80 MHz</option>
+            <option value="40">40 MHz</option>
+            <option value="20">20 MHz</option>
+          </select>
         </div>
         <div class="mc-param">
           <label>AP BSSID
@@ -2343,7 +2351,8 @@
   function getMcParams() {
     return {
       mon: document.getElementById("mcMon").value.trim() || "mon0",
-      channel: document.getElementById("mcChannel").value.trim() || "48",
+      channel: document.getElementById("mcChannel").value.trim() || "36",
+      bw: (document.getElementById("mcBw") || {}).value || "80",
       ap: document.getElementById("mcAp").value.trim(),
       victim: document.getElementById("mcVictim").value.trim(),
       alpha: document.getElementById("mcAlpha").value.trim() || "1.0",
@@ -2431,6 +2440,7 @@
           o.value = v.mac;
           o.setAttribute("data-ap", v.ap || "");
           o.textContent = v.mac + "  ·  " + v.frames + " BFI" +
+            (v.mode ? " (" + v.mode + ")" : "") +
             (v.rssi != null ? "  ·  " + v.rssi + " dBm" : "") +
             (v.ap ? "  → AP " + v.ap : "");
           $mcVictimList.appendChild(o);

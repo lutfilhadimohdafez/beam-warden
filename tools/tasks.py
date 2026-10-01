@@ -30,17 +30,22 @@ TASK_REGISTRY: dict[str, dict] = {
             "  [ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
             "  iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
             "  iw phy $PHY interface add {mon} type monitor; "
-            "  ip link set {mon} up; "
             "fi; "
-            # BW80 to match the AX3200 wl0 (validated in challenges G3:
-            # `set freq 5220 80 5210`). center80=5210 is fixed for the UNII-1
-            # block (ch36-48); primary = 5000 + ch*5. 20MHz missed HE frames.
-            # May fail 'busy' while tshark holds the iface — fine, freq is set.
-            "iw dev {mon} set freq $((5000 + {channel} * 5)) 80 5210 2>/dev/null; "
-            "iw dev {mon} info | grep -E 'type|channel|txpower'",
+            "ip link set {mon} up; "  # always (idempotent path too): a DOWN iface captures nothing
+            # bandwidth-aware retune: let iw derive the center from channel+width.
+            # 40MHz secondary side (+/-) from channel parity in the UNII block
+            # (36/44 -> HT40+, 40/48 -> HT40-). Match this to the AP's width or
+            # the Alfa may capture nothing. May fail 'busy' if tshark holds it.
+            "case {bw} in "
+            "20) SPEC=HT20;; "
+            "40) q=$(( {channel} / 4 )); [ $((q % 2)) -eq 1 ] && SPEC=HT40+ || SPEC=HT40-;; "
+            "*) SPEC=80MHz;; "
+            "esac; "
+            "iw dev {mon} set channel {channel} $SPEC 2>/dev/null; "
+            "iw dev {mon} info | grep -E 'type|channel'",
         ],
         "privileged": True,
-        "description": "Create monitor interface if missing + set 80MHz channel (idempotent).",
+        "description": "Create monitor iface if missing + set channel at the chosen bandwidth (idempotent).",
     },
     "scan_adapters": {
         "label": "Scan Adapters",
