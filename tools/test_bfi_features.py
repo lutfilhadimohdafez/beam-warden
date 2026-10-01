@@ -11,6 +11,8 @@ import csv
 import os
 import sys
 import tempfile
+import threading
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -23,6 +25,7 @@ from bfi_features import (
     extract_features,
     frame_to_features,
     get_bitwidths,
+    stream_features,
     _meta_rows,
     _all_frame_bytes,
     _mimo_and_report,
@@ -30,6 +33,52 @@ from bfi_features import (
 )
 
 PCAP = os.path.join(os.path.dirname(__file__), "..", "data", "bfi_he_capture.pcap")
+
+
+def test_stream_features_burst_continuity() -> None:
+    """stream_features: two bursts, frame_id climbs across boundary."""
+    burst_a = [("1", "0x0000000019", 10), ("2", "0x0000000019", 10)]
+    burst_b = [("3", "0x0000000019", 10), ("4", "0x0000000019", 10), ("5", "0x0000000019", 10)]
+
+    # mc=0x19: nr=4 (bits[3:5]=3), nc=2 (bits[0:2]=1), codebook=0, feedback=0
+    # report needs ≥30 bits for Nst≥1 with NANG=10, b_phi=4, b_psi=2
+    _mc = bytes([0x19, 0x00, 0x00, 0x00, 0x00])
+    _rpt = b"\xff" * 4
+    _fake_frame = _mc + _rpt + b"\x00" * 4
+
+    call_count = 0
+
+    def mock_meta_rows(_pcap):
+        nonlocal call_count
+        call_count += 1
+        return burst_a if call_count <= 2 else burst_b
+
+    def mock_all_frame_bytes(_pcap, frame_numbers=None):
+        return {fn: _fake_frame for fn in (frame_numbers or [])}
+
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = 0
+    mock_proc.returncode = 0
+
+    stop = threading.Event()
+
+    with patch("bfi_features.subprocess") as mock_sub, \
+         patch("bfi_features._meta_rows", side_effect=mock_meta_rows), \
+         patch("bfi_features._all_frame_bytes", side_effect=mock_all_frame_bytes):
+        mock_sub.Popen.return_value = mock_proc
+        mock_sub.PIPE = -1
+
+        feats = []
+        for feat in stream_features("lo", stop_event=stop):
+            feats.append(feat)
+            if len(feats) >= 5:
+                stop.set()
+
+    assert len(feats) >= 5, f"expected >=5 feats, got {len(feats)}"
+    assert [f["frame"] for f in feats[:5]] == [1, 2, 3, 4, 5], (
+        f"first5 frame_ids not contiguous: {[f['frame'] for f in feats[:5]]}"
+    )
+    print(f"[PASS] stream_features: {len(feats)} feats across 2 bursts, frame_ids 1..5 contiguous")
 
 
 def main() -> None:
@@ -127,6 +176,8 @@ def main() -> None:
 
     finally:
         os.unlink(tmp_path)
+
+    test_stream_features_burst_continuity()
 
     print("\n=== ALL CHECKS PASSED ===")
 

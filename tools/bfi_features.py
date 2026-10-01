@@ -294,23 +294,7 @@ def extract_features(
 # Live streaming
 # ---------------------------------------------------------------------------
 
-def _live_meta_rows(pcap_path: str, seen: set) -> List[Tuple[str, str, int]]:
-    """Return category-30 meta rows not yet in *seen*."""
-    rows = _meta_rows(pcap_path)
-    return [(fn, mc, rl) for fn, mc, rl in rows if fn not in seen]
-
-
-def _live_frame_bytes(pcap_path: str, frame_numbers: List[str]) -> Dict[str, bytes]:
-    """Read raw bytes for specific frames from a (possibly growing) pcap.
-
-    ponytail: tshark -x on a live-written pcap may race; retry on failure.
-    """
-    for _attempt in range(3):
-        try:
-            return _all_frame_bytes(pcap_path, frame_numbers=frame_numbers)
-        except Exception:
-            time.sleep(0.05)
-    return {}
+BURST = 3  # seconds per capture burst; latency ceiling ≈ BURST seconds (batchy)
 
 
 def stream_features(
@@ -321,107 +305,93 @@ def stream_features(
 ) -> Iterator[Dict[str, float]]:
     """Yield feature dicts from live BFI capture on *iface*.
 
-    Uses a background tshark capture writing to a temp pcap, polled
-    periodically for new category-30 frames.  Temporal-var window state
-    is maintained across yielded frames.
+    Captures short bounded bursts (BURST seconds) into a fresh temp pcap each
+    cycle, decodes the full small file, then unlinks it.  Temporal-var window
+    state and frame_id persist across bursts so continuity is preserved.
 
-    If *stop_event* is provided, setting it breaks the poll loop promptly
-    and terminates the tshark subprocess.
+    If *stop_event* is provided, setting it breaks the loop promptly and
+    terminates any running tshark subprocess.
 
-    ponytail: capture-to-tmpfile-then-decode — true real-time raw-byte
-    extraction from a live tshark pipe is not viable (tshark -x blocks).
-    Latency ceiling: poll_interval (0.5s) + tshark write buffering.
+    ponytail: latency ceiling is ~BURST seconds (batchy), not 0.5s.
+    BURST is the tuning knob.
     """
-    tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
-    tmp_path = tmp.name
-    tmp.close()
-
-    internal_stop = threading.Event()
+    window_state: Dict[str, List[float]] = {}
+    local_counter = 0
+    deadline = time.time() + duration if duration > 0 else float("inf")
     err_holder: list[str] = []
-    cap_proc: list = []
 
-    def _capture():
-        # NOTE: tshark rejects a display filter (-Y) together with live capture-to-file
-        # ("Display filters aren't supported when capturing and saving"). Capture all
-        # frames; the decode step (_live_meta_rows) filters category-30 from the pcap.
-        cmd = [
-            "tshark", "-i", iface,
-            "-w", tmp_path,
-        ]
-        if duration > 0:
-            cmd += ["-a", f"duration:{duration}"]
-        try:
+    try:
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                break
+            if time.time() >= deadline:
+                break
+
+            remaining = deadline - time.time()
+            burst = min(BURST, remaining) if duration > 0 else BURST
+            if burst <= 0:
+                break
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+
+            cmd = [
+                "tshark", "-i", iface,
+                "-w", tmp_path,
+                "-a", f"duration:{burst}",
+            ]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            cap_proc.append(proc)
-            proc.wait()
-            if proc.returncode != 0:
+
+            # poll for stop_event while tshark runs
+            while proc.poll() is None:
+                if stop_event is not None and stop_event.is_set():
+                    proc.terminate()
+                    break
+                time.sleep(0.1)
+
+            if proc.returncode is not None and proc.returncode != 0:
                 try:
                     err_holder.append(proc.stderr.read().decode())
                 except Exception:
                     pass
-        except Exception as e:
-            err_holder.append(str(e))
-        finally:
-            internal_stop.set()
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                break
 
-    cap_thread = threading.Thread(target=_capture, daemon=True)
-    cap_thread.start()
+            try:
+                rows = _meta_rows(tmp_path)
+                if rows:
+                    fb_cache = _all_frame_bytes(
+                        tmp_path, frame_numbers=[r[0] for r in rows]
+                    )
+                    for fn, mc_hex, rl in rows:
+                        info = _mimo_and_report(
+                            tmp_path, fn, mc_hex, rl,
+                            frame_bytes_cache=fb_cache,
+                        )
+                        local_counter += 1
+                        feat = frame_to_features(
+                            info["report"],
+                            int(info["nr"]), int(info["nc"]),
+                            int(info["codebook"]), int(info["feedback_type"]),
+                            window_state, frame_id=local_counter, window=window,
+                        )
+                        if feat is not None:
+                            yield feat
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
-    seen_frames: set = set()
-    window_state: Dict[str, List[float]] = {}
-    local_counter = 0
-    poll_interval = 0.5
-    deadline = time.time() + duration if duration > 0 else float("inf")
-
-    try:
-        while not internal_stop.is_set() and time.time() < deadline:
             if stop_event is not None and stop_event.is_set():
                 break
-            time.sleep(poll_interval)
-
-            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 24:
-                continue
-
-            try:
-                new_rows = _live_meta_rows(tmp_path, seen_frames)
-            except Exception:
-                continue
-
-            if not new_rows:
-                continue
-
-            fns = [r[0] for r in new_rows]
-            fb_cache = _live_frame_bytes(tmp_path, fns)
-            if not fb_cache:
-                continue
-
-            for fn, mc_hex, rl in new_rows:
-                seen_frames.add(fn)
-                info = _mimo_and_report(
-                    tmp_path, fn, mc_hex, rl, frame_bytes_cache=fb_cache,
-                )
-                local_counter += 1
-                feat = frame_to_features(
-                    info["report"],
-                    int(info["nr"]), int(info["nc"]),
-                    int(info["codebook"]), int(info["feedback_type"]),
-                    window_state, frame_id=local_counter, window=window,
-                )
-                if feat is not None:
-                    yield feat
 
     finally:
-        internal_stop.set()
-        for proc in cap_proc:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-        cap_thread.join(timeout=5)
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        pass
 
 
 # ---------------------------------------------------------------------------
