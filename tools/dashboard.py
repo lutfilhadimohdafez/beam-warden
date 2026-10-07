@@ -505,11 +505,15 @@ async def _run_endpoint(request: Request) -> JSONResponse:
 
 async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
     """Spawn subprocess, stream stdout/stderr to all WS clients."""
-    # ponytail: pkexec wrapper for privileged tasks (ported from attack_gui)
+    # ponytail: pkexec wrapper for privileged tasks (ported from attack_gui).
+    # stdbuf -oL -eL forces line-buffering: child printf() block-buffers over a
+    # PIPE (not a tty), so without this the console stays EMPTY until ~4KB piles
+    # up — at a few frames/sec that is effectively never. stdbuf makes every line
+    # stream live (how we read INJECT=ok/FAIL from main_su).
     if privileged:
-        proc_cmd = ["pkexec"] + cmd
+        proc_cmd = ["pkexec", "stdbuf", "-oL", "-eL"] + cmd
     else:
-        proc_cmd = cmd
+        proc_cmd = ["stdbuf", "-oL", "-eL"] + cmd
 
     # tell the UI the task is running NOW (not only on completion) so the chip
     # turns running and the Stop button enables — otherwise a running task can
@@ -556,13 +560,17 @@ async def _stop_endpoint(request: Request) -> JSONResponse:
     if st["state"] != "running":
         return JSONResponse({"error": f"task {name} not running"}, status_code=409)
 
-    # ponytail: root-kill for privileged tasks (ported from attack_gui)
+    # ponytail: root-kill for privileged tasks (ported from attack_gui).
+    # MUST be non-blocking: a blocking subprocess.run() here froze the whole
+    # async event loop while pkexec waited on its auth dialog -> the GUI stopped
+    # updating and the console went dead. create_subprocess_exec + await keeps
+    # the loop live so status/console keep flowing while the kill lands.
     if entry["privileged"]:
         try:
-            subprocess.run(
-                ["pkexec", "pkill", "-INT", "-f", cmd_pattern(name, entry)],
-                timeout=20,
+            killer = await asyncio.create_subprocess_exec(
+                "pkexec", "pkill", "-INT", "-f", cmd_pattern(name, entry),
             )
+            await asyncio.wait_for(killer.wait(), timeout=25)
         except Exception:
             pass
     else:
