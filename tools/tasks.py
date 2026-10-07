@@ -42,10 +42,25 @@ TASK_REGISTRY: dict[str, dict] = {
             "*) SPEC=80MHz;; "
             "esac; "
             "iw dev {mon} set channel {channel} $SPEC 2>/dev/null; "
-            "iw dev {mon} info | grep -E 'type|channel'",
+            "iw dev {mon} info | grep -E 'type|channel'; "
+            # DEAF-CARD CHECK: the mt7921u firmware wedges at 80MHz (goes RX-deaf
+            # -> 0 packets even on a busy channel). Sniff the sysfs rx counter for
+            # 3s; if it does not climb, the radio is deaf -> reload the driver
+            # (Reset Monitor) before capturing, instead of running blind.
+            # ponytail: needs air traffic on the channel; a dead-quiet channel
+            # reads as a false deaf, but our capture channels always carry beacons.
+            "R1=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
+            "sleep 3; "
+            "R2=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
+            "if [ \"$R2\" -gt \"$R1\" ]; then "
+            "  echo \"RADIO OK: heard $((R2-R1)) packets in 3s\"; "
+            "else "
+            "  echo \"*** DEAF CARD: 0 packets in 3s on ch{channel} -- mt7921u wedged. "
+            "Run Reset Monitor (or modprobe -r/modprobe mt7921u) then Setup again BEFORE capturing. ***\"; "
+            "fi",
         ],
         "privileged": True,
-        "description": "Create monitor iface if missing + set channel at the chosen bandwidth (idempotent).",
+        "description": "Create monitor iface if missing + set channel at the chosen bandwidth, then verify the radio is not RX-deaf (idempotent).",
     },
     "reset_monitor": {
         "label": "Reset Monitor",
