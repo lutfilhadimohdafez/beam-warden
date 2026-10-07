@@ -14,3 +14,12 @@ def test_setup_monitor_has_deaf_card_check():
     joined = " ".join(cmd)
     assert "/sys/class/net/mon0/statistics/rx_packets" in joined
     assert "DEAF CARD" in joined
+
+
+def test_recover_monitor_reloads_driver():
+    cmd = resolve_cmd("recover_monitor", {"mon": "mon0", "channel": "36", "bw": "80"})
+    joined = " ".join(cmd)
+    assert "modprobe -r mt7921u" in joined
+    assert "modprobe mt7921u" in joined
+    assert "DEAF CARD" in joined
+    assert "type monitor" in joined

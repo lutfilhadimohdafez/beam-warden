@@ -81,6 +81,40 @@ TASK_REGISTRY: dict[str, dict] = {
         "privileged": True,
         "description": "Tear down the monitor iface and restore wlan1 to managed WiFi + NetworkManager (inverse of Setup Monitor).",
     },
+    "recover_monitor": {
+        "label": "Recover Alfa (deaf fix)",
+        "cmd": [
+            "sh", "-c",
+            # Reload the mt7921u driver to cure an RX-deaf (wedged) Alfa, then
+            # rebuild the monitor iface at the chosen bandwidth and verify RX.
+            "iw dev {mon} del 2>/dev/null; "
+            "modprobe -r mt7921u; sleep 1; modprobe mt7921u; sleep 3; "
+            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+            "for d in /sys/class/ieee80211/$PHY/device/net/*; do "
+            "iw dev $(basename $d) del 2>/dev/null; done; "
+            "iw phy $PHY interface add {mon} type monitor; "
+            "ip link set {mon} up; "
+            "case {bw} in "
+            "20) SPEC=HT20;; "
+            "40) q=$(( {channel} / 4 )); [ $((q % 2)) -eq 1 ] && SPEC=HT40+ || SPEC=HT40-;; "
+            "*) SPEC=80MHz;; "
+            "esac; "
+            "iw dev {mon} set channel {channel} $SPEC 2>/dev/null; "
+            "iw dev {mon} info | grep -E 'type|channel'; "
+            "R1=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
+            "sleep 3; "
+            "R2=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
+            "if [ \"$R2\" -gt \"$R1\" ]; then "
+            "  echo \"RADIO OK: heard $((R2-R1)) packets in 3s\"; "
+            "else "
+            "  echo \"*** DEAF CARD: 0 packets in 3s on ch{channel} -- mt7921u wedged. "
+            "Run Reset Monitor (or modprobe -r/modprobe mt7921u) then Setup again BEFORE capturing. ***\"; "
+            "fi",
+        ],
+        "privileged": True,
+        "description": "Reload the mt7921u driver and rebuild the monitor iface at the chosen bandwidth to cure an RX-deaf (wedged) Alfa, then verify it hears.",
+    },
     "scan_adapters": {
         "label": "Scan Adapters",
         "cmd": ["iw", "dev"],
