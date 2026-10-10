@@ -26,7 +26,11 @@ TASK_REGISTRY: dict[str, dict] = {
             # Belt-and-suspenders: kill any standalone supplicant on wlan1.
             # Moved OUTSIDE the monitor-exists guard so a re-run re-asserts.
             "systemctl stop NetworkManager wpa_supplicant 2>/dev/null; "
-            "pkill -f wpa_supplicant 2>/dev/null; "
+            # NOTE: use -x (exact process NAME) not -f (full cmdline) — this
+            # script's own text contains "wpa_supplicant", so `pkill -f` matched
+            # and SIGTERM-killed this very sh process (code -15) before it could
+            # build mon0. -x only ever hits the real daemon.
+            "pkill -x wpa_supplicant 2>/dev/null; "
             # --- CARD CHECK (never run blind) --- find the Alfa by DRIVER
             # (mt7921u), never by name or phy index — both drift across reloads.
             # If no mt7921u radio is present, building mon0 would land on an empty
