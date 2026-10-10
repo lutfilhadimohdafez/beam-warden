@@ -20,17 +20,15 @@ TASK_REGISTRY: dict[str, dict] = {
         "label": "Setup Monitor Mode",
         "cmd": [
             "sh", "-c",
-            # REAL fence: stop NetworkManager + wpa_supplicant so they cannot
-            # re-grab the Alfa phy.  Ethernet (enp0s20...) stays up because a
-            # clean systemctl stop does NOT deconfigure already-configured links.
-            # Belt-and-suspenders: kill any standalone supplicant on wlan1.
-            # Moved OUTSIDE the monitor-exists guard so a re-run re-asserts.
-            "systemctl stop NetworkManager wpa_supplicant 2>/dev/null; "
-            # NOTE: use -x (exact process NAME) not -f (full cmdline) — this
-            # script's own text contains "wpa_supplicant", so `pkill -f` matched
-            # and SIGTERM-killed this very sh process (code -15) before it could
-            # build mon0. -x only ever hits the real daemon.
-            "pkill -x wpa_supplicant 2>/dev/null; "
+            # SURGICAL fence (2026-10-11): do NOT `systemctl stop NetworkManager`.
+            # PROVEN this night (journal 01:03:47): on this box NM manages BOTH
+            # the USB-RJ45 (enp0s20, DHCP) and the Intel wlan0, so stopping it
+            # tore down ALL uplink — telnet + sounder died — forcing a Recover
+            # every single time. The old comment claiming "ethernet stays up" was
+            # false. Instead we release ONLY the Alfa phy from NM further down
+            # (nmcli set managed no, once it's identified). A monitor-only phy has
+            # nothing NM/wpa_supplicant can grab or channel-hop, so no daemon kill
+            # is needed and the ethernet + Intel uplink stay up throughout.
             # --- CARD CHECK (never run blind) --- find the Alfa by DRIVER
             # (mt7921u), never by name or phy index — both drift across reloads.
             # If no mt7921u radio is present, building mon0 would land on an empty
@@ -44,6 +42,13 @@ TASK_REGISTRY: dict[str, dict] = {
             # hardcoded wlan1, so we can never delete the Intel's interface.
             "VIF=$(ls /sys/class/ieee80211/$PHY/device/net/ 2>/dev/null | grep -vx '{mon}' | head -1); "
             "echo \"ALFA OK: $PHY (mt7921u) vif=${{VIF:-none}} -- this is the attack radio\"; "
+            # surgical fence: tell NM to stop managing EVERY vif on the Alfa phy
+            # (incl. any p2p-dev) so it won't channel-hop or re-grab it. Scoped
+            # strictly to this phy's own vifs — never the Intel's, never the
+            # ethernet — so all uplink is left untouched. Replaces the old global
+            # `systemctl stop NetworkManager` that killed every NIC.
+            "for v in $(ls /sys/class/ieee80211/$PHY/device/net/ 2>/dev/null); do "
+            "nmcli device set \"$v\" managed no 2>/dev/null; done; "
             # auto channel detect MUST scan the managed vif BEFORE it becomes mon0
             # (once converted there is no managed vif left to scan).
             "if [ '{channel}' = 'auto' ]; then "
@@ -207,12 +212,19 @@ TASK_REGISTRY: dict[str, dict] = {
             "iw phy $PHY interface add {mon} type monitor; "
             "ip link set {mon} up; "
             # 80MHz needs `set freq` on the mt7921u (see setup_monitor note).
-            "case {bw} in "
-            "20) iw dev {mon} set channel {channel} HT20 2>/dev/null;; "
-            "40) q=$(( {channel} / 4 )); [ $((q % 2)) -eq 1 ] && S=HT40+ || S=HT40-; "
-            "    iw dev {mon} set channel {channel} $S 2>/dev/null;; "
-            "*) PRIM=$((5000 + {channel} * 5)); "
-            "   case {channel} in 36|40|44|48) CEN=5210;; 52|56|60|64) CEN=5290;; "
+            # Sanitize channel/bw first: the GUI may pass 'auto' (or blank). The
+            # old code fed that straight into $(( )) -> `set freq 5000 80 5000`
+            # -> silent fail -> mon0 stranded on ch1, deaf to the 5GHz target
+            # (burned us twice on 2026-10-11). Default to ch36/80 unless the
+            # value is a plain number.
+            "CH={channel}; case \"$CH\" in ''|*[!0-9]*) CH=36;; esac; "
+            "BW={bw}; case \"$BW\" in 20|40) ;; *) BW=80;; esac; "
+            "case $BW in "
+            "20) iw dev {mon} set channel $CH HT20 2>/dev/null;; "
+            "40) q=$(( $CH / 4 )); [ $((q % 2)) -eq 1 ] && S=HT40+ || S=HT40-; "
+            "    iw dev {mon} set channel $CH $S 2>/dev/null;; "
+            "*) PRIM=$((5000 + $CH * 5)); "
+            "   case $CH in 36|40|44|48) CEN=5210;; 52|56|60|64) CEN=5290;; "
             "   100|104|108|112) CEN=5530;; 116|120|124|128) CEN=5610;; "
             "   132|136|140|144) CEN=5690;; 149|153|157|161) CEN=5775;; *) CEN=$PRIM;; esac; "
             "   iw dev {mon} set freq $PRIM 80 $CEN 2>/dev/null;; "
@@ -224,7 +236,7 @@ TASK_REGISTRY: dict[str, dict] = {
             "if [ \"$R2\" -gt \"$R1\" ]; then "
             "  echo \"RADIO OK: heard $((R2-R1)) packets in 3s\"; "
             "else "
-            "  echo \"*** DEAF CARD: 0 packets in 3s on ch{channel} -- mt7921u wedged. "
+            "  echo \"*** DEAF CARD: 0 packets in 3s on ch$CH -- mt7921u wedged. "
             "Run Reset Monitor (or modprobe -r/modprobe mt7921u) then Setup again BEFORE capturing. ***\"; "
             "fi",
         ],
@@ -256,9 +268,14 @@ TASK_REGISTRY: dict[str, dict] = {
             "--alpha", "{alpha}",
             "--type", "{type}",
             "--offset", "{offset}",
+            # flood stays at the binary default (1 = one injection per UNIQUE
+            # forged BFI). 2026-10-11: flood 1 gave -55% MCS drop; a flood-64 run
+            # gave only -19% BUT that run was on a just-reset Alfa (Recover Alfa
+            # pressed between), so the comparison is confounded. Default (1) is
+            # the proven-strong setting; re-test flood as a clean A/B if needed.
         ],
         "privileged": True,
-        "description": "Launch BeamCraft beamforming-spoofing attack.",
+        "description": "Launch BeamCraft beamforming-spoofing attack (flood 1 = strongest; see note).",
     },
     "train_detector": {
         "label": "Train Detector",
