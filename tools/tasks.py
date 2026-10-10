@@ -109,6 +109,41 @@ TASK_REGISTRY: dict[str, dict] = {
         "privileged": True,
         "description": "Tear down the monitor iface, restore wlan1 to managed WiFi, and restart NetworkManager + wpa_supplicant.",
     },
+    "restore_intel": {
+        "label": "Restore Intel WiFi",
+        "cmd": [
+            "sh", "-c",
+            # Bring the Intel (wlan0) back to normal managed WiFi WITHOUT
+            # tearing down mon0. Restart NM + wpa_supplicant (wlan0 reconnects
+            # via autoconnect), then fence the Alfa phy so the shared supplicant
+            # cannot grab mon0 / channel-hop it (the Oct-7 failure). Best-effort:
+            # reports whether mon0 actually survived rather than assuming it did.
+            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+            "systemctl start NetworkManager wpa_supplicant 2>/dev/null; "
+            "sleep 3; "
+            # keep NM/supplicant off the Alfa: unmanage every vif on its phy and
+            # delete any managed/p2p-dev vif they spun up there (never {mon}).
+            "if [ -n \"$PHY\" ]; then "
+            "  for v in $(ls /sys/class/ieee80211/$PHY/device/net/ 2>/dev/null); do "
+            "    nmcli device set \"$v\" managed no 2>/dev/null; "
+            "    [ \"$v\" != '{mon}' ] && iw dev \"$v\" del 2>/dev/null; "
+            "  done; "
+            "fi; "
+            # the Intel is onboard phy0/wlan0 (stable name) — make sure NM owns it
+            "nmcli device set wlan0 managed yes 2>/dev/null; "
+            "nmcli -w 20 device connect wlan0 2>/dev/null; "
+            "sleep 2; "
+            "echo '--- wlan0 (Intel) ---'; "
+            "nmcli -t -f DEVICE,STATE,CONNECTION device status 2>/dev/null | grep '^wlan0' || echo 'wlan0 not reported'; "
+            "echo '--- mon0 preserved? ---'; "
+            "iw dev {mon} info 2>/dev/null | grep -E 'type|channel' || echo 'mon0 GONE — rebuild via Setup Monitor before firing'; "
+            "echo '--- internet ---'; "
+            "ip route get 1.1.1.1 2>/dev/null | head -1 || echo 'no route'",
+        ],
+        "privileged": True,
+        "description": "Bring the Intel (wlan0) back to normal WiFi by restarting NetworkManager + wpa_supplicant, while fencing the Alfa phy so mon0 is preserved (reports if it survived).",
+    },
     "check_channel": {
         "label": "Check Channel",
         "cmd": [

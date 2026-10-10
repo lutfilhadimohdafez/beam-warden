@@ -50,6 +50,15 @@ def test_reset_monitor_starts_services():
     assert "systemctl start NetworkManager" in joined
 
 
+def test_restore_intel_restarts_nm_and_preserves_mon0():
+    cmd = resolve_cmd("restore_intel", {"mon": "mon0"})
+    joined = " ".join(cmd)
+    assert "systemctl start NetworkManager" in joined   # bring the Intel back
+    assert "device connect wlan0" in joined
+    assert "mt7921u" in joined                           # fences the Alfa phy
+    assert "mon0 preserved" in joined                    # reports mon0 survival
+
+
 def test_recover_monitor_reloads_driver():
     cmd = resolve_cmd("recover_monitor", {"mon": "mon0", "channel": "36", "bw": "80", "bssid": "5c:02:14:b0:34:13"})
     joined = " ".join(cmd)
