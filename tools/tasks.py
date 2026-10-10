@@ -26,22 +26,28 @@ TASK_REGISTRY: dict[str, dict] = {
             # Belt-and-suspenders: kill any standalone supplicant on wlan1.
             # Moved OUTSIDE the monitor-exists guard so a re-run re-asserts.
             "systemctl stop NetworkManager wpa_supplicant 2>/dev/null; "
-            "pkill -f 'wpa_supplicant.*wlan1' 2>/dev/null; "
-            # idempotent: only build the monitor iface when it is NOT already up.
-            "if ! iw dev {mon} info 2>/dev/null | grep -q 'type monitor'; then "
-            "  PHY=$(for p in /sys/class/ieee80211/phy*; do "
-            "  [ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
-            "  iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
-            "  iw phy $PHY interface add {mon} type monitor; "
-            "fi; "
-            "ip link set {mon} up; "
-            # auto channel detection: scan wlan1 (still exists here) for the
-            # target BSSID before converting to mon0.
+            "pkill -f wpa_supplicant 2>/dev/null; "
+            # --- CARD CHECK (never run blind) --- find the Alfa by DRIVER
+            # (mt7921u), never by name or phy index — both drift across reloads.
+            # If no mt7921u radio is present, building mon0 would land on an empty
+            # phy or grab the Intel (weak injection). Abort loud instead.
+            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
+            "if [ -z \"$PHY\" ]; then echo '*** NO ALFA FOUND: no mt7921u radio present. "
+            "Plug the Alfa dongle in and retry — refusing to touch the Intel card. ***'; exit 1; fi; "
+            # the Alfa's current managed vif lives under that phy's device dir
+            # (whatever its name) — every teardown below is scoped to it, not a
+            # hardcoded wlan1, so we can never delete the Intel's interface.
+            "VIF=$(ls /sys/class/ieee80211/$PHY/device/net/ 2>/dev/null | grep -vx '{mon}' | head -1); "
+            "echo \"ALFA OK: $PHY (mt7921u) vif=${{VIF:-none}} -- this is the attack radio\"; "
+            # auto channel detect MUST scan the managed vif BEFORE it becomes mon0
+            # (once converted there is no managed vif left to scan).
             "if [ '{channel}' = 'auto' ]; then "
-            "  ip link set wlan1 up 2>/dev/null; "
-            "  SCAN=$(iw dev wlan1 scan 2>/dev/null); "
-            "  FREQ=$(echo \"$SCAN\" | grep -A5 'BSS {bssid}' | grep 'freq:' | head -1 | grep -oP '\\d+'); "
-            "  WIDTH_RAW=$(echo \"$SCAN\" | grep -A30 'BSS {bssid}' | grep -i 'channel width' | head -1); "
+            "  if [ -n \"$VIF\" ]; then ip link set \"$VIF\" up 2>/dev/null; "
+            "    SCAN=$(iw dev \"$VIF\" scan 2>/dev/null); "
+            "    FREQ=$(echo \"$SCAN\" | grep -A5 'BSS {bssid}' | grep 'freq:' | head -1 | grep -oP '\\d+'); "
+            "    WIDTH_RAW=$(echo \"$SCAN\" | grep -A30 'BSS {bssid}' | grep -i 'channel width' | head -1); "
+            "  fi; "
             "  if [ -n \"$FREQ\" ]; then "
             "    CH=$(echo \"($FREQ - 5000) / 5\" | bc); "
             "    if echo \"$WIDTH_RAW\" | grep -qi '80'; then W=80; "
@@ -55,6 +61,14 @@ TASK_REGISTRY: dict[str, dict] = {
             "else "
             "  CH={channel}; W={bw}; "
             "fi; "
+            # build mon0 on the Alfa's phy (idempotent). Deletes scoped to $VIF
+            # (the mt7921u vif) — structurally cannot touch the Intel.
+            "if ! iw dev {mon} info 2>/dev/null | grep -q 'type monitor'; then "
+            "  iw dev {mon} del 2>/dev/null; "
+            "  [ -n \"$VIF\" ] && iw dev \"$VIF\" del 2>/dev/null; "
+            "  iw phy $PHY interface add {mon} type monitor; "
+            "fi; "
+            "ip link set {mon} up; "
             # bandwidth-aware retune
             "case $W in "
             "20) SPEC=HT20;; "

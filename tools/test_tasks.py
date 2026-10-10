@@ -18,8 +18,19 @@ def test_setup_monitor_has_deaf_card_check():
 def test_setup_monitor_auto_channel_scans():
     cmd = resolve_cmd("setup_monitor", {"mon": "mon0", "channel": "auto", "bw": "80", "bssid": "5c:02:14:b0:34:13"})
     joined = " ".join(cmd)
-    assert "iw dev wlan1 scan" in joined
+    assert 'iw dev "$VIF" scan' in joined   # scans the Alfa vif, not a hardcoded name
     assert "DETECTED" in joined
+
+
+def test_setup_monitor_checks_card_before_building():
+    # must identify the Alfa by driver and refuse to run if it is absent,
+    # instead of blindly building mon0 on the wrong (Intel) radio.
+    cmd = resolve_cmd("setup_monitor", {"mon": "mon0", "channel": "auto", "bw": "80", "bssid": "5c:02:14:b0:34:13"})
+    joined = " ".join(cmd)
+    assert "mt7921u" in joined
+    assert "NO ALFA FOUND" in joined
+    assert "exit 1" in joined
+    assert "wlan1 del" not in joined        # no hardcoded-name teardown survives
 
 
 def test_check_channel_exists_and_is_privileged():
