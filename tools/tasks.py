@@ -20,55 +20,67 @@ TASK_REGISTRY: dict[str, dict] = {
         "label": "Setup Monitor Mode",
         "cmd": [
             "sh", "-c",
+            # REAL fence: stop NetworkManager + wpa_supplicant so they cannot
+            # re-grab the Alfa phy.  Ethernet (enp0s20...) stays up because a
+            # clean systemctl stop does NOT deconfigure already-configured links.
+            # Belt-and-suspenders: kill any standalone supplicant on wlan1.
+            # Moved OUTSIDE the monitor-exists guard so a re-run re-asserts.
+            "systemctl stop NetworkManager wpa_supplicant 2>/dev/null; "
+            "pkill -f 'wpa_supplicant.*wlan1' 2>/dev/null; "
             # idempotent: only build the monitor iface when it is NOT already up.
-            # Re-running while it exists used to tear it down (killing the live
-            # BFI capture / a running attack) and error with "resource busy" /
-            # "already exists". Now we just re-set the channel on the existing one.
             "if ! iw dev {mon} info 2>/dev/null | grep -q 'type monitor'; then "
-            "  nmcli device set wlan1 managed no; "
             "  PHY=$(for p in /sys/class/ieee80211/phy*; do "
             "  [ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
             "  iw dev {mon} del 2>/dev/null; iw dev wlan1 del 2>/dev/null; "
             "  iw phy $PHY interface add {mon} type monitor; "
             "fi; "
-            "ip link set {mon} up; "  # always (idempotent path too): a DOWN iface captures nothing
-            # bandwidth-aware retune: let iw derive the center from channel+width.
-            # 40MHz secondary side (+/-) from channel parity in the UNII block
-            # (36/44 -> HT40+, 40/48 -> HT40-). Match this to the AP's width or
-            # the Alfa may capture nothing. May fail 'busy' if tshark holds it.
-            "case {bw} in "
+            "ip link set {mon} up; "
+            # auto channel detection: scan wlan1 (still exists here) for the
+            # target BSSID before converting to mon0.
+            "if [ '{channel}' = 'auto' ]; then "
+            "  ip link set wlan1 up 2>/dev/null; "
+            "  SCAN=$(iw dev wlan1 scan 2>/dev/null); "
+            "  FREQ=$(echo \"$SCAN\" | grep -A5 'BSS {bssid}' | grep 'freq:' | head -1 | grep -oP '\\d+'); "
+            "  WIDTH_RAW=$(echo \"$SCAN\" | grep -A30 'BSS {bssid}' | grep -i 'channel width' | head -1); "
+            "  if [ -n \"$FREQ\" ]; then "
+            "    CH=$(echo \"($FREQ - 5000) / 5\" | bc); "
+            "    if echo \"$WIDTH_RAW\" | grep -qi '80'; then W=80; "
+            "    elif echo \"$WIDTH_RAW\" | grep -qi '40'; then W=40; "
+            "    else W=20; fi; "
+            "    echo \"DETECTED AP {bssid}: channel $CH, width ${{W}}MHz\"; "
+            "  else "
+            "    echo '*** WARNING: scan found no BSS {bssid} — falling back to ch36/80MHz ***'; "
+            "    CH=36; W=80; "
+            "  fi; "
+            "else "
+            "  CH={channel}; W={bw}; "
+            "fi; "
+            # bandwidth-aware retune
+            "case $W in "
             "20) SPEC=HT20;; "
-            "40) q=$(( {channel} / 4 )); [ $((q % 2)) -eq 1 ] && SPEC=HT40+ || SPEC=HT40-;; "
+            "40) q=$(( $CH / 4 )); [ $((q % 2)) -eq 1 ] && SPEC=HT40+ || SPEC=HT40-;; "
             "*) SPEC=80MHz;; "
             "esac; "
-            "iw dev {mon} set channel {channel} $SPEC 2>/dev/null; "
+            "iw dev {mon} set channel $CH $SPEC 2>/dev/null; "
             "iw dev {mon} info | grep -E 'type|channel'; "
-            # DEAF-CARD CHECK: the mt7921u firmware wedges at 80MHz (goes RX-deaf
-            # -> 0 packets even on a busy channel). Sniff the sysfs rx counter for
-            # 3s; if it does not climb, the radio is deaf -> reload the driver
-            # (Reset Monitor) before capturing, instead of running blind.
-            # ponytail: needs air traffic on the channel; a dead-quiet channel
-            # reads as a false deaf, but our capture channels always carry beacons.
+            # DEAF-CARD CHECK
             "R1=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
             "sleep 3; "
             "R2=$(cat /sys/class/net/{mon}/statistics/rx_packets 2>/dev/null || echo 0); "
             "if [ \"$R2\" -gt \"$R1\" ]; then "
             "  echo \"RADIO OK: heard $((R2-R1)) packets in 3s\"; "
             "else "
-            "  echo \"*** DEAF CARD: 0 packets in 3s on ch{channel} -- mt7921u wedged. "
+            "  echo \"*** DEAF CARD: 0 packets in 3s on ch$CH -- mt7921u wedged. "
             "Run Reset Monitor (or modprobe -r/modprobe mt7921u) then Setup again BEFORE capturing. ***\"; "
             "fi",
         ],
         "privileged": True,
-        "description": "Create monitor iface if missing + set channel at the chosen bandwidth, then verify the radio is not RX-deaf (idempotent).",
+        "description": "Neutralise wpa_supplicant + NetworkManager, create monitor iface if missing, auto-detect channel (or use manual), then verify the radio is not RX-deaf.",
     },
     "reset_monitor": {
         "label": "Reset Monitor",
         "cmd": [
             "sh", "-c",
-            # inverse of setup_monitor: tear down the monitor iface and hand the
-            # Alfa back to managed WiFi + NetworkManager. ponytail: detect the
-            # mt7921u phy (it re-enumerates after a modprobe reload), never hardcode phy0.
             "PHY=$(for p in /sys/class/ieee80211/phy*; do "
             "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
             "iw dev {mon} del 2>/dev/null; "
@@ -76,10 +88,50 @@ TASK_REGISTRY: dict[str, dict] = {
             "iw phy $PHY interface add wlan1 type managed 2>/dev/null; "
             "nmcli device set wlan1 managed yes 2>/dev/null; "
             "ip link set wlan1 up 2>/dev/null; "
+            "systemctl start NetworkManager 2>/dev/null; "
+            "systemctl start wpa_supplicant 2>/dev/null; "
             "iw dev wlan1 info | grep -E 'Interface|type'",
         ],
         "privileged": True,
-        "description": "Tear down the monitor iface and restore wlan1 to managed WiFi + NetworkManager (inverse of Setup Monitor).",
+        "description": "Tear down the monitor iface, restore wlan1 to managed WiFi, and restart NetworkManager + wpa_supplicant.",
+    },
+    "check_channel": {
+        "label": "Check Channel",
+        "cmd": [
+            "sh", "-c",
+            "BSSID={bssid}; "
+            "if iw dev {mon} info 2>/dev/null | grep -q 'type monitor'; then "
+            "  RESULT=$(tshark -i {mon} -a duration:4 "
+            "    -Y \"wlan.bssid==$BSSID && wlan.fc.type_subtype==0x0008\" "
+            "    -T fields -e radiotap.channel.freq 2>/dev/null | sort | uniq -c | sort -rn | head -1); "
+            "  COUNT=$(echo \"$RESULT\" | awk '{{print $1}}'); "
+            "  FREQ=$(echo \"$RESULT\" | awk '{{print $2}}'); "
+            "  if [ -n \"$FREQ\" ] && [ \"$FREQ\" -gt 0 ] 2>/dev/null; then "
+            "    CH=$(( (FREQ - 5000) / 5 )); "
+            "    echo \"AP $BSSID: channel $CH ($FREQ MHz), seen ${{COUNT:-0}} beacons\"; "
+            "  else "
+            "    echo \"AP $BSSID: no beacons seen in 4s on {mon}\"; "
+            "  fi; "
+            "elif iw dev wlan1 info 2>/dev/null | grep -q 'type managed'; then "
+            "  ip link set wlan1 up 2>/dev/null; "
+            "  SCAN=$(iw dev wlan1 scan 2>/dev/null); "
+            "  FREQ=$(echo \"$SCAN\" | grep -A5 \"BSS $BSSID\" | grep 'freq:' | head -1 | grep -oP '\\d+'); "
+            "  WIDTH_RAW=$(echo \"$SCAN\" | grep -A30 \"BSS $BSSID\" | grep -i 'channel width' | head -1); "
+            "  if [ -n \"$FREQ\" ]; then "
+            "    CH=$(( (FREQ - 5000) / 5 )); "
+            "    if echo \"$WIDTH_RAW\" | grep -qi '80'; then W=80; "
+            "    elif echo \"$WIDTH_RAW\" | grep -qi '40'; then W=40; "
+            "    else W=20; fi; "
+            "    echo \"AP $BSSID: channel $CH ($FREQ MHz), width ${{W}}MHz\"; "
+            "  else "
+            "    echo \"AP $BSSID: not found in scan\"; "
+            "  fi; "
+            "else "
+            "  echo 'No wireless interface available (need mon0 or wlan1)'; "
+            "fi",
+        ],
+        "privileged": True,
+        "description": "Non-destructive channel peek: sniffs beacons on mon0 or scans wlan1 to report the target AP's current channel.",
     },
     "recover_monitor": {
         "label": "Recover Alfa (deaf fix)",

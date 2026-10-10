@@ -1429,7 +1429,7 @@
         </div>
         <div class="mc-param">
           <label>Channel</label>
-          <input id="mcChannel" value="36" placeholder="36">
+          <input id="mcChannel" value="auto" placeholder="auto or 36">
         </div>
         <div class="mc-param">
           <label>Bandwidth</label>
@@ -2351,9 +2351,10 @@
   function getMcParams() {
     return {
       mon: document.getElementById("mcMon").value.trim() || "mon0",
-      channel: document.getElementById("mcChannel").value.trim() || "36",
+      channel: document.getElementById("mcChannel").value.trim() || "auto",
       bw: (document.getElementById("mcBw") || {}).value || "80",
       ap: document.getElementById("mcAp").value.trim(),
+      bssid: document.getElementById("mcAp").value.trim(),
       victim: document.getElementById("mcVictim").value.trim(),
       alpha: document.getElementById("mcAlpha").value.trim() || "1.0",
       offset: document.getElementById("mcOffset").value.trim() || "33",
@@ -2462,7 +2463,7 @@
 
   /* FIX 3a: explicit mission sequence order */
   var TASK_ORDER = [
-    "setup_monitor", "reset_monitor", "recover_monitor", "scan_adapters", "capture_bfi", "start_attack",
+    "setup_monitor", "check_channel", "reset_monitor", "recover_monitor", "scan_adapters", "capture_bfi", "start_attack",
     "decode_features", "train_detector", "gen_synthetic", "test_echo"
   ];
 

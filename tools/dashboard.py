@@ -490,7 +490,9 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     # default a run-id (empty {run} → "_air.pcap"); ensure the capture dir exists
     if not params.get("run"):
         params["run"] = time.strftime("%Y%m%d_%H%M%S")
-    params.setdefault("bw", "80")  # monitor bandwidth; other tasks ignore it
+    params.setdefault("bw", "80")
+    params.setdefault("bssid", "5c:02:14:b0:34:13")
+    params.setdefault("channel", "auto")  # monitor bandwidth; other tasks ignore it
     (Path(__file__).resolve().parent.parent / "results" / "sessions").mkdir(parents=True, exist_ok=True)
 
     cmd = resolve_cmd(name, params)
