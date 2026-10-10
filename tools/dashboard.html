@@ -780,7 +780,7 @@
     border-color: var(--border-light);
     transform: translateY(-2px);
     box-shadow: var(--shadow-warm-lg);
-    z-index: 50;
+    z-index: 1200;  /* above the router-feed panel (1100) so the hover X-ray wins */
   }
   /* hover X-ray: the exact command this button runs, param-substituted. */
   .mc-task-cmd {
@@ -788,7 +788,7 @@
     position: absolute;
     left: 0; right: 0;
     top: calc(100% + 4px);
-    z-index: 60;
+    z-index: 1201;
     background: var(--panel-3, #0d0f12);
     border: 1px solid var(--accent, #4fc3f7);
     box-shadow: var(--shadow-warm-lg);
