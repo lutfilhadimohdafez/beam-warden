@@ -578,9 +578,16 @@ async def _stop_endpoint(request: Request) -> JSONResponse:
     # updating and the console went dead. create_subprocess_exec + await keeps
     # the loop live so status/console keep flowing while the kill lands.
     if entry["privileged"]:
+        # SIGINT was ignored by main_su (it only handles SIGTERM for a clean
+        # exit) so Stop silently did nothing. Send TERM, then KILL anything that
+        # survives 1s. One pkexec auth. The ^-anchored pattern can't self-match
+        # pkill's own cmdline.
+        pat = cmd_pattern(name, entry)
         try:
             killer = await asyncio.create_subprocess_exec(
-                "pkexec", "pkill", "-INT", "-f", cmd_pattern(name, entry),
+                "pkexec", "sh", "-c",
+                f"pkill -TERM -f '{pat}' 2>/dev/null; sleep 1; "
+                f"pkill -KILL -f '{pat}' 2>/dev/null",
             )
             await asyncio.wait_for(killer.wait(), timeout=25)
         except Exception:
