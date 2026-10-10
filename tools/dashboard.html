@@ -774,12 +774,45 @@
     gap: 8px;
     transition: border-color 0.25s, transform 0.25s cubic-bezier(0.23,1,0.32,1), box-shadow 0.25s;
     box-shadow: var(--shadow-warm);
+    position: relative;
   }
   .mc-task:hover {
     border-color: var(--border-light);
     transform: translateY(-2px);
     box-shadow: var(--shadow-warm-lg);
+    z-index: 50;
   }
+  /* hover X-ray: the exact command this button runs, param-substituted. */
+  .mc-task-cmd {
+    display: none;
+    position: absolute;
+    left: 0; right: 0;
+    top: calc(100% + 4px);
+    z-index: 60;
+    background: var(--panel-3, #0d0f12);
+    border: 1px solid var(--accent, #4fc3f7);
+    box-shadow: var(--shadow-warm-lg);
+    padding: 10px 12px;
+    max-height: 52vh;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    line-height: 1.55;
+    color: var(--text-bright, #e8e8e8);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  .mc-task:hover .mc-task-cmd { display: block; }
+  .mc-task-cmd .cmd-hd {
+    display: block;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .mc-task-cmd .cmd-hd.priv { color: var(--danger, #f04848); }
   .mc-task-header {
     display: flex;
     align-items: center;
@@ -2467,6 +2500,25 @@
     "decode_features", "train_detector", "gen_synthetic", "test_echo"
   ];
 
+  /* X-ray: render the task's REAL command, param-substituted, one clause per
+     line. Pulled straight from the registry cmd so it can't drift from what
+     actually runs. Recomputed on each hover so it reflects current inputs. */
+  function prettyCmd(t) {
+    var cmd = t.cmd || [];
+    var isSh = cmd.length >= 3 && cmd[0] === "sh" && cmd[1] === "-c";
+    var raw = isSh ? cmd[2] : cmd.join(" ");
+    var params = {};
+    try { params = getMcParams(); } catch (e) {}
+    Object.keys(params).forEach(function (k) {
+      var v = params[k];
+      if (v !== "" && v != null) raw = raw.split("{" + k + "}").join(v);
+    });
+    /* undo the Python str.format escaping ({{ }} -> { }) so the shown shell
+       matches what actually runs (e.g. ${W}, not ${{W}}). */
+    raw = raw.replace(/\{\{/g, "{").replace(/\}\}/g, "}");
+    return isSh ? raw.replace(/;\s+/g, ";\n") : raw.replace(/\s--/g, "\n  --");
+  }
+
   function buildGrid(tasks) {
     $mcGrid.innerHTML = "";
     var names = Object.keys(tasks);
@@ -2530,9 +2582,25 @@
       actions.appendChild(runBtn);
       actions.appendChild(stopBtn);
 
+      var cmdBox = document.createElement("div");
+      cmdBox.className = "mc-task-cmd";
+      var cmdHd = document.createElement("span");
+      cmdHd.className = "cmd-hd" + (t.privileged ? " priv" : "");
+      cmdHd.textContent = t.privileged ? "⚠ RUNS AS ROOT (pkexec):" : "RUNS:";
+      var cmdBody = document.createElement("span");
+      cmdBody.className = "cmd-body";
+      cmdBody.textContent = prettyCmd(t);
+      cmdBox.appendChild(cmdHd);
+      cmdBox.appendChild(cmdBody);
+      /* refresh on hover so the shown command matches the live param inputs */
+      card.addEventListener("mouseenter", function () {
+        cmdBody.textContent = prettyCmd(t);
+      });
+
       card.appendChild(header);
       card.appendChild(desc);
       card.appendChild(actions);
+      card.appendChild(cmdBox);
       $mcGrid.appendChild(card);
     });
   }
