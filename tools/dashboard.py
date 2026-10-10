@@ -44,6 +44,16 @@ latest_sample: dict | None = None
 
 # ── runtime session state ─────────────────────────────────────────────────
 _current_task: asyncio.Task | None = None  # currently running producer task
+# last session state, so a tab that connects LATER can sync (not just tabs that
+# were open when it changed). Replayed to each new websocket on connect.
+LAST_SESSION: dict = {"type": "session", "source": "none", "detail": "disconnected"}
+
+
+async def _set_session(source: str, detail: str) -> None:
+    """Record the current session state and broadcast it to all tabs."""
+    global LAST_SESSION
+    LAST_SESSION = {"type": "session", "source": source, "detail": detail}
+    await _broadcast(LAST_SESSION)
 
 # ── BFI live stream state (optional, set when --bfi-iface is given) ──────
 BFI_LATEST: dict = {}  # thread-safe-ish: written by bfi thread, read by producer
@@ -700,8 +710,7 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         detail = f"live: {args.host}@{args.iface}"
         if getattr(args, "bfi_iface", None):
             detail += f" +bfi:{args.bfi_iface}"
-    session_msg = {"type": "session", "source": source, "detail": detail}
-    await _broadcast(session_msg)
+    await _set_session(source, detail)
 
     return JSONResponse({"ok": True, "source": source})
 
@@ -725,7 +734,7 @@ async def _session_stop(request: Request) -> JSONResponse:
     PLAYBACK["attack_start"] = -1
     PLAYBACK["idx"] = 0
     PLAYBACK["paused"] = False
-    await _broadcast({"type": "session", "source": "none", "detail": "disconnected"})
+    await _set_session("none", "disconnected")
     return JSONResponse({"ok": True})
 
 
@@ -1358,6 +1367,14 @@ async def _ws_handler(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps(meta))
     if latest_sample is not None:
         await websocket.send_text(json.dumps(latest_sample))
+    # sync a tab that connects LATER: replay the current session + task states
+    # so its Connect button / task chips match reality instead of booting stale.
+    await websocket.send_text(json.dumps(LAST_SESSION))
+    for _tname, _tst in TASK_STATE.items():
+        await websocket.send_text(json.dumps({
+            "type": "status", "task": _tname,
+            "state": _tst.get("state", "idle"), "code": _tst.get("code"),
+        }))
     try:
         while True:
             raw = await websocket.receive_text()

@@ -2206,8 +2206,13 @@
     }
     if (d.type === "session") {
       $sessionStatus.textContent = d.detail || d.source;
-      /* FIX 1: reset connect button when session ends (covers external disconnects) */
-      if (d.source === "none") {
+      /* sync the Connect button to the server's real state — covers a tab that
+         connected AFTER the session started (was booting stale as "Connect"),
+         and external disconnects. */
+      if (d.source === "live") {
+        liveConnected = true;
+        setLiveBtn("connected");
+      } else if (d.source === "none") {
         liveConnected = false;
         setLiveBtn("idle");
       }
