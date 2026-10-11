@@ -14,6 +14,10 @@ results/sessions/
 # raw off-air captures (huge) — commit only curated datasets
 data/*.pcapng
 data/bfi_*_2026*.pcap
+data/victim_*.pcap
+
+# flynn scratch job prompts — working inputs, not project docs
+docs/_flynn_*.md
 
 # local router creds (never commit — plaintext passwords)
 tools/routers.local.json
