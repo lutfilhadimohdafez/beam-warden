@@ -18,6 +18,14 @@ def make_samples(mcs_list, rssi=-66):
     ]
 
 
+def make_jittery(mcs, rssi_list):
+    """Phase where RSSI wobbles sample-to-sample (rssi_primary = rssi0 = r)."""
+    return [
+        {"tx_mcs": mcs, "rssi0": r, "rssi1": r - 2, "rssi2": r - 3, "rssi3": r - 1}
+        for r in rssi_list
+    ]
+
+
 def test_confirmed_drop_steady_rssi():
     off1 = phase_stats(make_samples([9, 9, 9]))
     on = phase_stats(make_samples([4, 4, 4]))
@@ -27,16 +35,27 @@ def test_confirmed_drop_steady_rssi():
     assert isinstance(detail, str) and detail
 
 
-def test_confounded_when_rssi_moves():
+def test_confounded_when_baseline_drifts():
+    # OFF baseline slid -70 -> -64 across the cycle = real drift (the exact
+    # ghost the "-55%" result was riding on). Must be CONFOUNDED even though
+    # MCS "dropped" on ON.
     off1 = phase_stats(make_samples([9, 9, 9], rssi=-70))
     on = phase_stats(make_samples([4, 4, 4], rssi=-67))
-    on["rssi_range"] = 6
-    on["rssi_min"] = -70
-    on["rssi_max"] = -64
-    off2 = phase_stats(make_samples([9, 9, 9], rssi=-70))
-    label, detail = verdict(off1, on, off2, inject_count=12, drift_tol=2.0)
+    off2 = phase_stats(make_samples([9, 9, 9], rssi=-64))
+    label, detail = verdict(off1, on, off2, inject_count=12, drift_tol=3.0)
     assert label == "CONFOUNDED"
     assert "INVALID" in detail
+
+
+def test_jitter_within_phases_is_tolerated():
+    # RSSI wobbles 3-4 dB sample-to-sample but the per-phase MEDIAN is steady
+    # at -66 across all three phases. This is a normal clamped handheld — it
+    # must NOT confound. MCS drops 9->4 on ON and recovers -> ATTACK CONFIRMED.
+    off1 = phase_stats(make_jittery(9, [-66, -64, -68, -66, -65]))
+    on = phase_stats(make_jittery(4, [-67, -65, -66, -66, -64]))
+    off2 = phase_stats(make_jittery(9, [-66, -67, -65, -66, -64]))
+    label, _ = verdict(off1, on, off2, inject_count=12, drift_tol=3.0)
+    assert label == "ATTACK CONFIRMED"
 
 
 def test_no_effect_flat_mcs():

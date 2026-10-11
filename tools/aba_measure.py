@@ -97,21 +97,31 @@ def verdict(off1: dict, on: dict, off2: dict, inject_count: int, drift_tol: floa
     NO EFFECT / INCONCLUSIVE.
     """
     confounded = "result INVALID, re-measure on a steadier signal."
-    for name, ph in (("OFF-1", off1), ("ON", on), ("OFF-2", off2)):
-        rng = ph.get("rssi_range") or 0
-        if rng > drift_tol:
+    # Confound test on MEDIAN RSSI, NOT raw range. A real handheld always
+    # jitters a few dB around a stable mean — that wobble is harmless and
+    # averages out. What INVALIDATES an A/B/A is the signal MEAN drifting: if
+    # the OFF baseline moved between OFF-1 and OFF-2, or ON sat at a different
+    # level than the OFF baseline, the MCS gap isn't attributable to the attack.
+    # Medians over a phase are robust to the jitter; this is the drift the
+    # earlier "-55%" result was secretly riding on (RSSI slid -62 -> -73).
+    r1, ron, r2 = off1.get("median_rssi"), on.get("median_rssi"), off2.get("median_rssi")
+    if r1 is not None and r2 is not None:
+        baseline_drift = abs(r1 - r2)
+        if baseline_drift > drift_tol:
             return (
                 "CONFOUNDED",
-                f"RSSI moved Δ={rng:g} dB during {name}; {confounded}",
+                f"OFF baseline RSSI drifted {baseline_drift:g} dB across the cycle "
+                f"({r1:g} -> {r2:g} dB) — the signal mean moved, not just jittered; "
+                f"{confounded}",
             )
-    mins = [p["rssi_min"] for p in (off1, on, off2) if p.get("rssi_min") is not None]
-    maxs = [p["rssi_max"] for p in (off1, on, off2) if p.get("rssi_max") is not None]
-    if mins and maxs:
-        cycle_range = max(maxs) - min(mins)
-        if cycle_range > drift_tol:
+    if None not in (r1, ron, r2):
+        off_base = statistics.median([r1, r2])
+        level_gap = abs(ron - off_base)
+        if level_gap > drift_tol:
             return (
                 "CONFOUNDED",
-                f"RSSI moved Δ={cycle_range:g} dB during the run; {confounded}",
+                f"ON-phase RSSI ({ron:g} dB) sits {level_gap:g} dB off the OFF "
+                f"baseline ({off_base:g} dB) — MCS gap not attributable; {confounded}",
             )
 
     m1, mo, m2 = off1.get("median_mcs"), on.get("median_mcs"), off2.get("median_mcs")
@@ -337,8 +347,10 @@ def main(argv=None):
     p.add_argument("--on", type=float, default=20, metavar="sec")
     p.add_argument("--cycles", type=int, default=1)
     p.add_argument("--preflight", type=float, default=30, metavar="sec")
-    p.add_argument("--rssi-tol", type=float, default=1.0, metavar="dB")
-    p.add_argument("--drift-tol", type=float, default=2.0, metavar="dB")
+    p.add_argument("--rssi-tol", type=float, default=3.0, metavar="dB",
+                   help="preflight jitter above this just prints a note (advisory, never aborts)")
+    p.add_argument("--drift-tol", type=float, default=3.0, metavar="dB",
+                   help="median RSSI drift across OFF phases (or ON-vs-OFF gap) above this = CONFOUNDED")
     p.add_argument("--sample-interval", type=float, default=1.5, metavar="sec")
     p.add_argument("--out", default=None, metavar="csvpath")
     args = p.parse_args(argv)
@@ -378,22 +390,33 @@ def main(argv=None):
             writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
             writer.writeheader()
 
-            # -- RSSI preflight gate
+            # -- RSSI preflight: ADVISORY, not a gate. A handheld always
+            # jitters a few dB; demanding a still signal is unphysical. The real
+            # confound (baseline drift) is caught per-cycle in verdict() by
+            # comparing median RSSI across the bracketing OFF phases. Here we
+            # just report the baseline and bail only on a PATHOLOGICAL swing
+            # (phone being moved / losing association).
             pre = run_phase(
                 ont, args.iface, args.preflight, args.sample_interval,
                 0, "PRE", False, writer,
             )
             rssis = [r for s in pre if (r := rssi_primary(s)) != 0]
             if not rssis:
-                abort("preflight produced no valid RSSI samples — cannot verify stability.")
+                abort("preflight read no valid RSSI — is the victim associated? ping it, then re-run.")
+            med = statistics.median(rssis)
             spread = max(rssis) - min(rssis)
+            print(f"[preflight] RSSI median {med:g} dB, jitter Δ={spread:g} dB over {args.preflight:g}s")
             if spread > args.rssi_tol:
-                abort(
-                    f"RSSI unstable (Δ={spread:g} dB over {args.preflight:g}s) — "
-                    "clamp the phone / wait for it to settle, then re-run. "
-                    "Refusing to measure on a drifting target."
+                print(
+                    f"[preflight] note: Δ={spread:g} dB jitter is normal for a handheld — "
+                    "proceeding. The A/B/A controls drift at the median level per cycle.",
+                    file=sys.stderr,
                 )
-            print(f"[preflight] RSSI stable at {max(rssis)} dB (Δ={spread:g} dB)")
+            if spread > 15:
+                abort(
+                    f"RSSI swinging {spread:g} dB — the phone is moving or dropping "
+                    "association, not just jittering. Clamp it, confirm it's connected, re-run."
+                )
 
             table_rows = []
             all_off1, all_on, all_off2 = [], [], []
