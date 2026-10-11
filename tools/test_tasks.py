@@ -1,11 +1,15 @@
 from tasks import resolve_cmd, TASK_REGISTRY
 
 
-def test_setup_monitor_stops_services():
+def test_setup_monitor_fences_alfa_surgically():
+    # 2026-10-11: the global `systemctl stop NetworkManager` was removed — on
+    # this box NM manages the USB-RJ45 uplink too, so stopping it tore down
+    # telnet + sounder every time. The fence must instead be scoped to the
+    # Alfa phy's own vifs via `nmcli device set <vif> managed no`.
     cmd = resolve_cmd("setup_monitor", {"mon": "mon0", "channel": "48", "bw": "80", "bssid": "5c:02:14:b0:34:13"})
     joined = " ".join(cmd)
-    assert "systemctl stop NetworkManager" in joined
-    assert "wpa_supplicant" in joined
+    assert "nmcli device set" in joined and "managed no" in joined
+    assert "systemctl stop NetworkManager" not in joined  # regression guard: never nuke global uplink
 
 
 def test_setup_monitor_has_deaf_card_check():

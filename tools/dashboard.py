@@ -578,16 +578,26 @@ async def _stop_endpoint(request: Request) -> JSONResponse:
     # updating and the console went dead. create_subprocess_exec + await keeps
     # the loop live so status/console keep flowing while the kill lands.
     if entry["privileged"]:
-        # SIGINT was ignored by main_su (it only handles SIGTERM for a clean
-        # exit) so Stop silently did nothing. Send TERM, then KILL anything that
-        # survives 1s. One pkexec auth. The ^-anchored pattern can't self-match
-        # pkill's own cmdline.
+        # Stop main_su reliably. TERM only sets app_stopped=1 (main_su.cpp:34);
+        # when the Alfa goes RX-deaf the loop is parked in a blocking
+        # pcap_next_ex() and never returns to check the flag, so TERM is
+        # swallowed. SIGKILL is the only thing that stops a syscall-blocked
+        # binary. We still TERM first for the clean-exit case (prints the INJECT
+        # SUMMARY), then KILL. The ^-anchored -f pattern can't self-match
+        # pkill's own cmdline; comm (exact binary name) is the robust target for
+        # a real binary (main_su) — a root-owned process the -f path-regex kept
+        # missing (2026-10-11: had to `sudo pkill -x main_su` by hand).
         pat = cmd_pattern(name, entry)
+        comm = kill_comm(entry)  # exact comm for a real binary, else None
+        script = (
+            f"pkill -TERM -f '{pat}' 2>/dev/null; sleep 1; "
+            f"pkill -KILL -f '{pat}' 2>/dev/null"
+        )
+        if comm:
+            script += f"; pkill -KILL -x '{comm}' 2>/dev/null"
         try:
             killer = await asyncio.create_subprocess_exec(
-                "pkexec", "sh", "-c",
-                f"pkill -TERM -f '{pat}' 2>/dev/null; sleep 1; "
-                f"pkill -KILL -f '{pat}' 2>/dev/null",
+                "pkexec", "sh", "-c", script,
             )
             await asyncio.wait_for(killer.wait(), timeout=25)
         except Exception:
@@ -613,6 +623,21 @@ def cmd_pattern(name: str, entry: dict) -> str:
         if c not in ("sh", "-c", "python"):
             return f"^{c}"
     return f"^{cmd[0]}"
+
+
+def kill_comm(entry: dict) -> str | None:
+    """Exact process name (comm, ≤15 chars) for a task that runs a real binary.
+
+    Returns None for sh/python script tasks — `pkill -x sh`/`-x python` would
+    nuke unrelated system processes. Only a dedicated binary like main_su gets
+    an exact-name kill, which is what reliably reaps it when it's blocked in a
+    syscall and ignoring TERM.
+    """
+    cmd = entry["cmd"]
+    if cmd[0] in ("sh", "python"):
+        return None
+    base = os.path.basename(cmd[0])
+    return base[:15] if base else None
 
 
 # ── runtime session endpoints ─────────────────────────────────────────────
