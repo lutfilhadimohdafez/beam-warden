@@ -175,3 +175,44 @@ matrix. `rho = 1` is a no-op; `rho -> 0` is maximum misdirection. Sweeping `rho`
 strength (reduction rate rises as `rho` falls — paper Fig 11d), which is how the **attack class**
 gets graded intensities for the dataset. In our testbed the GN630v is the AP; the degradation this
 forgery causes is exactly what `tools/gn630v_telemetry.py --label attack` records.
+
+## 8. Why the attack is traffic-dependent (sounding-gated)
+
+A recurring question: *the attack only bites under sudden/bursty traffic, not under a stable
+saturating stream — why?* Because **BeamCraft is beam-poisoning, not a flood.** The forged BFI can
+only corrupt a steering matrix **at the moment the AP recomputes one — a sounding event** (§2). The
+AP does not ingest feedback continuously: it sounds, builds a matrix, then *reuses* that matrix until
+it decides to sound again. The forgery can only hijack a sounding that is actually happening.
+
+So the behaviour follows the AP's sounding cadence:
+
+- **Stable / saturating demand** → the AP's TX queue stays **backlogged**. It keeps pushing frames on
+  the matrix it already has and **rarely re-sounds** (no reason to refresh the beam mid-blast). The
+  forged BFI arrives with **no fresh sounding to poison** → it lands on a stale genuine matrix and
+  throughput looks flat. *The attack fired; there was no open door.*
+- **Bursty traffic (idle gap → burst)** → during the gap the matrix goes **stale**, so the next burst
+  **forces a re-sound** to refresh the beam — and that is the exact window the forged BFI gets
+  ingested and **poisons a fresh matrix**. Every burst = a new sounding = a new poisoning opportunity.
+
+**One-liner (viva):** *"BeamCraft can only corrupt a steering matrix at the instant the AP recomputes
+one. A saturating flow keeps the AP riding a stale matrix and rarely re-sounds, so the forgery has
+nothing to poison; bursty traffic forces fresh soundings, which is precisely when it lands."*
+
+**This is a strength, not a limitation — three points:**
+1. **Real traffic is bursty.** Web loads, video buffer-fills, app sync, chat, scrolling are all
+   idle-gap-then-burst. A flat-out speedtest is the exception. The paper's own victim was **video**
+   (§4), which buffers in chunks = bursty — consistent with this.
+2. **It is why detection must be PHY-based, not a bandwidth alarm.** Under light/stable load the beam
+   poisoning can land without denting throughput much, so a naive "Mbps dropped!" monitor is blind.
+   The ML model reads **MCS / retry / PHY features**, catching the poisoning even when bandwidth looks
+   fine. This is the project's strongest real-world argument.
+3. **The attacker does not control the AP's sounding clock** — impact is gated by re-sounding cadence,
+   which is exactly what the A/B/A harness demonstrates on purpose.
+
+**If an examiner pushes ("so a continuous download is immune?"):** not immune — **diluted.** Even
+saturating flows re-sound periodically (rate adaptation, timers), so hits still land, just spread
+thin; and a perfectly saturating flow is rare in practice.
+
+This is why `tools/aba_throughput.py` drives **bursts with idle gaps** rather than one saturating
+stream (docstring: *"idle gap forces re-sounding; steady saturation does NOT sound"*), and why §6 of
+the progress report lists "Saturating TCP hides re-sounding" as a measurement caveat.
