@@ -3,6 +3,7 @@
 ponytail: predefined registry only — NO arbitrary command exec.
 """
 
+import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -276,6 +277,24 @@ TASK_REGISTRY: dict[str, dict] = {
         ],
         "privileged": True,
         "description": "Launch BeamCraft beamforming-spoofing attack (flood 1 = strongest; see note).",
+    },
+    "throughput_test": {
+        "label": "Throughput Test (A/B/A)",
+        "cmd": [
+            # sys.executable = the venv python (has telnet/3.14 deps); an absolute
+            # path survives pkexec's reset PATH, unlike bare "python".
+            sys.executable, str(_TOOLS / "aba_throughput.py"),
+            "--mon", "{mon}",
+            "--ap", "{ap}",
+            "--victim", "{victim}",
+            "--victim-ip", "{victim_ip}",
+            "--bitrate", "{bitrate}",  # 0 = unleash (full channel, no load cap)
+            "--out", str(_ROOT / "results" / "sessions" / "{run}_tput.csv"),
+        ],
+        "privileged": True,
+        "description": "OFF->ON->OFF downlink throughput measurement vs the attack. "
+                       "Load Cap blank/0 = unleash (full channel); set Mbps to cap. "
+                       "Needs iperf3 -s on the phone (Victim IP) + mon0 hearing.",
     },
     "train_detector": {
         "label": "Train Detector",

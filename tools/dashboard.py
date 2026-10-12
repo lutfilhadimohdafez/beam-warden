@@ -12,6 +12,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -133,6 +134,11 @@ _calib_target = 150
 _CALIB_MIN = 30
 _TRAIN_CMD = [sys.executable, str(Path(__file__).resolve().parent / "train_detector.py")]
 _HISTORY_PATH = Path(__file__).resolve().parent.parent / "models" / "training_history.json"
+# Switchable per-situation baselines: each profile trains its OWN model under
+# models/profiles/<profile>.joblib; "activating" one copies it over the live
+# detector.joblib (so a dashboard restart keeps the activated baseline).
+_PROFILES_DIR = Path(__file__).resolve().parent.parent / "models" / "profiles"
+_ACTIVE_PATH = Path(__file__).resolve().parent.parent / "models" / "active_profile.txt"
 
 
 def score_sample(msg: dict) -> tuple[float | None, bool]:
@@ -506,6 +512,8 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     params.setdefault("bw", "80")
     params.setdefault("bssid", "5c:02:14:b0:34:13")
     params.setdefault("channel", "auto")  # monitor bandwidth; other tasks ignore it
+    params.setdefault("victim_ip", "192.168.31.158")  # throughput_test iperf server
+    params.setdefault("bitrate", "0")  # 0 = unleash (full channel, no load cap)
     (Path(__file__).resolve().parent.parent / "results" / "sessions").mkdir(parents=True, exist_ok=True)
 
     cmd = resolve_cmd(name, params)
@@ -843,6 +851,96 @@ def _append_calib_csv(features: list[str], vec: list[float], profile: str = "def
         w.writerow([f"{v}" for v in vec] + [_sanitize_profile(profile)])
 
 
+def _rename_calib_profile(old: str, new: str, path: Path | None = None) -> int:
+    """Retag every normal_calib.csv row from profile `old` to `new`. Returns count.
+
+    Adds a profile column to a legacy (column-less) file so the rename sticks.
+    Rewrites the whole file — fine, the calibration CSV is small.
+    """
+    path = _CALIB_CSV if path is None else path
+    old_s, new_s = _sanitize_profile(old), _sanitize_profile(new)
+    if not path.is_file():
+        return 0
+    with path.open(newline="") as f:
+        r = csv.reader(f)
+        header = next(r, None)
+        if header is None:
+            return 0
+        rows = [row for row in r if row]
+    has = "profile" in header
+    out_header = header if has else header + ["profile"]
+    pidx = out_header.index("profile")
+    n = 0
+    new_rows = []
+    for row in rows:
+        p = _calib_profile_of(header, row)
+        if not has:
+            row = row + [p]
+        if p == old_s:
+            row[pidx] = new_s
+            n += 1
+        new_rows.append(row)
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(out_header)
+        w.writerows(new_rows)
+    return n
+
+
+# ── switchable baseline helpers ────────────────────────────────────────────
+def _profile_model_path(name) -> Path:
+    return _PROFILES_DIR / f"{_sanitize_profile(name)}.joblib"
+
+
+def _read_active_profile() -> str | None:
+    try:
+        s = _ACTIVE_PATH.read_text().strip()
+        return s or None
+    except Exception:
+        return None
+
+
+def _write_active_profile(name: str) -> None:
+    _ACTIVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _ACTIVE_PATH.write_text(_sanitize_profile(name))
+
+
+def _activate_profile(name: str) -> bool:
+    """Copy a profile's saved model over the live detector + reload. False if none."""
+    src = _profile_model_path(name)
+    if not src.is_file():
+        return False
+    shutil.copyfile(src, _MODEL_PATH)
+    _write_active_profile(name)
+    _reload_detector()
+    global _calibrated
+    _calibrated = True
+    return True
+
+
+async def _train_to(csv_path: Path, out_path: Path) -> tuple[bool, str, float | None, str]:
+    """Run train_detector.py (csv_path -> out_path). Returns (ok, fpr_str, fpr_val, err)."""
+    cmd = _TRAIN_CMD + ["--csv", str(csv_path), "--out", str(out_path)]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+    except Exception as exc:
+        return (False, "", None, f"train exec error: {exc}")
+    if proc.returncode != 0:
+        return (False, "", None, f"train failed: {stderr.decode()[:500]}")
+    fpr_str, fpr_val = "", None
+    for line in stdout.decode().splitlines():
+        if "false-positive" in line.lower():
+            fpr_str = line.strip()
+            m = re.search(r"(\d+\.\d+)", fpr_str)
+            if m:
+                fpr_val = float(m.group(1))
+            break
+    return (True, fpr_str, fpr_val, "")
+
+
 def _reload_detector() -> dict | None:
     """Reload the DETECTOR global from disk. Returns new DETECTOR or None."""
     global DETECTOR
@@ -1045,6 +1143,115 @@ async def _calibrate_profiles(request: Request) -> JSONResponse:
     return JSONResponse(_list_calib_profiles())
 
 
+async def _baselines_list(request: Request) -> JSONResponse:
+    """GET /baselines — per-situation baselines: calib count + saved model + active."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    counts = {p["profile"]: p["count"] for p in _list_calib_profiles()}
+    models: set[str] = set()
+    if _PROFILES_DIR.is_dir():
+        for f in _PROFILES_DIR.glob("*.joblib"):
+            models.add(f.stem)
+    active = _read_active_profile()
+    names = sorted(set(counts) | models)
+    out = [
+        {
+            "profile": n,
+            "count": counts.get(n, 0),
+            "has_model": n in models,
+            "active": n == active,
+        }
+        for n in names
+    ]
+    return JSONResponse({"baselines": out, "active": active, "min": _CALIB_MIN})
+
+
+async def _baselines_train(request: Request) -> JSONResponse:
+    """POST /baselines/train {profile, activate?} — train one profile as its own baseline."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    body = await _req_body(request)
+    profile = _sanitize_profile(body.get("profile"))
+    if not _CALIB_CSV.is_file():
+        return JSONResponse({"error": "no calibration data captured yet"}, status_code=400)
+    fd, tmp_name = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    tmp_csv = Path(tmp_name)
+    try:
+        n_rows = _filter_calib_csv(tmp_csv, [profile])
+        if n_rows < _CALIB_MIN:
+            return JSONResponse(
+                {"error": f"need >= {_CALIB_MIN} samples for '{profile}', have {n_rows}"},
+                status_code=400,
+            )
+        _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        ok, fpr_str, fpr_val, err = await _train_to(tmp_csv, _profile_model_path(profile))
+    finally:
+        tmp_csv.unlink(missing_ok=True)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=500)
+    # Log training history
+    feat_profile = _read_normal_profile()
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "n_samples": n_rows,
+        "source": f"baseline:{profile}",
+        "interval_s": args.interval,
+        "features": DETECTOR.get("features", []) if DETECTOR else [],
+        "training_fpr": fpr_val,
+        "feature_profile": feat_profile or {},
+        "model_params": {"n_estimators": 200},
+        "note": f"baseline '{profile}'",
+    }
+    history = _load_training_history()
+    history.append(entry)
+    _save_training_history(history)
+    activate = body.get("activate", True)
+    activated = _activate_profile(profile) if activate else False
+    return JSONResponse({
+        "ok": True, "profile": profile, "fpr": fpr_str,
+        "n_samples": n_rows, "activated": activated,
+    })
+
+
+async def _baselines_activate(request: Request) -> JSONResponse:
+    """POST /baselines/activate {profile} — make a saved baseline the live detector."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    body = await _req_body(request)
+    profile = _sanitize_profile(body.get("profile"))
+    if not _profile_model_path(profile).is_file():
+        return JSONResponse(
+            {"error": f"no saved model for '{profile}' — train it as a baseline first"},
+            status_code=400,
+        )
+    _activate_profile(profile)
+    return JSONResponse({"ok": True, "active": profile})
+
+
+async def _baselines_rename(request: Request) -> JSONResponse:
+    """POST /baselines/rename {old, new} — rename a baseline (model file + calib rows)."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    body = await _req_body(request)
+    old = _sanitize_profile(body.get("old"))
+    new = _sanitize_profile(body.get("new"))
+    if not body.get("new") or new == "default" and old != "default":
+        return JSONResponse({"error": "give a valid new name"}, status_code=400)
+    if old == new:
+        return JSONResponse({"ok": True, "renamed": [old, new]})
+    dst = _profile_model_path(new)
+    if dst.is_file():
+        return JSONResponse({"error": f"'{new}' already exists"}, status_code=400)
+    src = _profile_model_path(old)
+    if src.is_file():
+        src.rename(dst)
+    n = _rename_calib_profile(old, new)
+    if _read_active_profile() == old:
+        _write_active_profile(new)
+    return JSONResponse({"ok": True, "renamed": [old, new], "rows_retagged": n})
+
+
 async def _calibrate_reset(request: Request) -> JSONResponse:
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
@@ -1084,42 +1291,19 @@ async def _calibrate_train(request: Request) -> JSONResponse:
         n_rows = len(CALIB_BUFFER)
         csv_path = _CALIB_CSV
     # Run train_detector on the (possibly filtered) calibration CSV
-    cmd = _TRAIN_CMD + ["--csv", str(csv_path), "--out", str(_MODEL_PATH)]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            return JSONResponse({"error": f"train failed: {stderr.decode()[:500]}"}, status_code=500)
-    except Exception as exc:
-        return JSONResponse({"error": f"train exec error: {exc}"}, status_code=500)
+        ok, fpr_str, fpr_val, err = await _train_to(csv_path, _MODEL_PATH)
     finally:
         if tmp_csv is not None:
             tmp_csv.unlink(missing_ok=True)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=500)
     # Reload model in-process
     det = _reload_detector()
     if det is None:
         return JSONResponse({"error": "model reload failed after training"}, status_code=500)
     global _calibrated
     _calibrated = True  # model now baselined for the current environment
-    # Compute training FPR from the output
-    fpr_str = ""
-    fpr_val = None
-    for line in stdout.decode().splitlines():
-        if "false-positive" in line.lower():
-            fpr_str = line.strip()
-            # try to extract numeric fpr
-            try:
-                import re as _re
-                m = _re.search(r"(\d+\.\d+)", fpr_str)
-                if m:
-                    fpr_val = float(m.group(1))
-            except Exception:
-                pass
-            break
     # Log training history
     profile = _read_normal_profile()
     entry = {
@@ -1566,6 +1750,10 @@ app = Starlette(
         Route("/calibrate/reset", _calibrate_reset, methods=["POST"]),
         Route("/calibrate/train", _calibrate_train, methods=["POST"]),
         Route("/calibrate/profiles", _calibrate_profiles),
+        Route("/baselines", _baselines_list),
+        Route("/baselines/train", _baselines_train, methods=["POST"]),
+        Route("/baselines/activate", _baselines_activate, methods=["POST"]),
+        Route("/baselines/rename", _baselines_rename, methods=["POST"]),
         Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
         Route("/calibrate/target", _calibrate_target, methods=["POST"]),
         Route("/training-history", _training_history),
@@ -1621,6 +1809,22 @@ def _selfcheck_calib() -> None:
 
         assert _sanitize_profile("triple play!/") == "tripleplay"
         assert _sanitize_profile("") == "default"
+
+        # rename retags matching rows (and adds a profile column to a legacy file)
+        rn = td_path / "rn.csv"
+        with rn.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["throughput_tx_mbps", "retry_rate", "profile"])
+            w.writerow(["10.0", "0.01", "idle"])
+            w.writerow(["50.0", "0.10", "youtube"])
+        assert _rename_calib_profile("youtube", "my-home", rn) == 1
+        assert _list_calib_profiles(rn) == [
+            {"profile": "idle", "count": 1}, {"profile": "my-home", "count": 1}
+        ]
+        assert _rename_calib_profile("default", "events", legacy) == 2
+        assert _list_calib_profiles(legacy) == [{"profile": "events", "count": 2}]
+
+        assert _profile_model_path("my home!").name == "myhome.joblib"
     print("selfcheck-calib OK")
 
 

@@ -326,6 +326,11 @@ def main(argv=None):
     p.add_argument("--out", default=None, metavar="csvpath")
     args = p.parse_args(argv)
 
+    # 0 (or negative) = unleash: dashboard passes "0" for a blank cap, since the
+    # task template can't conditionally drop the flag. Treat it as None = flat out.
+    if args.bitrate is not None and args.bitrate <= 0:
+        args.bitrate = None
+
     out_path = Path(args.out) if args.out else (
         Path("results/sessions")
         / f"tput_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"

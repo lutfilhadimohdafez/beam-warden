@@ -1489,6 +1489,14 @@
           <select id="mcVictimList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
         </div>
         <div class="mc-param">
+          <label>Victim IP (iperf3 -s)</label>
+          <input id="mcVictimIp" value="192.168.31.158" placeholder="192.168.31.158">
+        </div>
+        <div class="mc-param">
+          <label>Attack Load Cap (Mbps)</label>
+          <input id="mcBitrate" value="" placeholder="blank = unleash">
+        </div>
+        <div class="mc-param">
           <label>Alpha</label>
           <input id="mcAlpha" value="1.0" placeholder="1.0">
         </div>
@@ -1629,6 +1637,20 @@
       </div>
       <div id="learnProfileList" style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:0.68rem;color:var(--muted);min-height:18px;"></div>
       <div id="learnTrainResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-top:8px;"></div>
+    </div>
+
+    <div class="section-label stagger">SWITCHABLE BASELINES</div>
+    <div class="mc-section stagger">
+      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:10px;">
+        Each situation is its own baseline model. Capture samples under a profile name
+        (e.g. <em>my-home</em>, <em>events-20pax</em>), train it, then <b>Activate</b> the one
+        that matches where you are — the detector switches to that normal.
+      </div>
+      <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:12px;">
+        Active baseline: <span id="learnActiveBaseline" style="color:var(--ok);font-weight:700;">—</span>
+      </div>
+      <div id="learnBaselineList" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);">Loading&hellip;</div>
+      <div id="learnBaselineResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-top:8px;"></div>
     </div>
 
     <div class="section-label stagger">LIVE MATCH METER</div>
@@ -2408,6 +2430,8 @@
       ap: document.getElementById("mcAp").value.trim(),
       bssid: document.getElementById("mcAp").value.trim(),
       victim: document.getElementById("mcVictim").value.trim(),
+      victim_ip: document.getElementById("mcVictimIp").value.trim() || "192.168.31.158",
+      bitrate: document.getElementById("mcBitrate").value.trim() || "0",  /* 0 = unleash */
       alpha: document.getElementById("mcAlpha").value.trim() || "1.0",
       offset: document.getElementById("mcOffset").value.trim() || "33",
       type: document.getElementById("mcType").value.trim() || "0xe0",
@@ -2516,7 +2540,7 @@
   /* FIX 3a: explicit mission sequence order */
   var TASK_ORDER = [
     "setup_monitor", "check_channel", "reset_monitor", "restore_intel", "recover_monitor", "scan_adapters", "capture_bfi", "start_attack",
-    "decode_features", "train_detector", "gen_synthetic", "test_echo"
+    "throughput_test", "decode_features", "train_detector", "gen_synthetic", "test_echo"
   ];
 
   /* X-ray: render the task's REAL command, param-substituted, one clause per
@@ -2773,6 +2797,99 @@
       $learnProfileName.value = btn.getAttribute("data-profile-name");
     });
   });
+
+  /* ---- Switchable per-situation baselines ---- */
+  var $learnActiveBaseline = document.getElementById("learnActiveBaseline");
+  var $learnBaselineList   = document.getElementById("learnBaselineList");
+  var $learnBaselineResult = document.getElementById("learnBaselineResult");
+  var learnBaselineMin = 30;
+
+  function learnBaselineMsg(text, ok) {
+    $learnBaselineResult.textContent = text;
+    $learnBaselineResult.style.color = ok ? "var(--ok)" : "var(--danger)";
+  }
+
+  function learnBaselinePost(url, body, okText) {
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error) { learnBaselineMsg("Error: " + d.error, false); return; }
+      learnBaselineMsg(okText(d), true);
+      learnFetchBaselines();
+      learnFetchStatus();
+      learnFetchHistory();
+    }).catch(function (e) { learnBaselineMsg("Fetch error: " + e, false); });
+  }
+
+  function learnFetchBaselines() {
+    fetch("/baselines").then(function (r) { return r.json(); }).then(function (d) {
+      learnBaselineMin = d.min || 30;
+      $learnActiveBaseline.textContent = d.active || "none";
+      $learnBaselineList.innerHTML = "";
+      var rows = d.baselines || [];
+      if (rows.length === 0) {
+        $learnBaselineList.textContent = "No profiles captured yet — capture some samples under a profile name above.";
+        return;
+      }
+      rows.forEach(function (b) {
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;";
+
+        var name = document.createElement("span");
+        name.style.cssText = "color:var(--text-bright);min-width:130px;font-weight:700;";
+        name.textContent = (b.active ? "▶ " : "") + b.profile;
+
+        var meta = document.createElement("span");
+        meta.style.cssText = "color:var(--muted);min-width:150px;";
+        meta.textContent = b.count + " samples" + (b.has_model ? " · trained" : " · no model");
+
+        var trainBtn = document.createElement("button");
+        trainBtn.className = "mc-btn run";
+        trainBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
+        trainBtn.textContent = b.has_model ? "Retrain" : "Train";
+        trainBtn.disabled = b.count < learnBaselineMin;
+        if (trainBtn.disabled) trainBtn.title = "need ≥ " + learnBaselineMin + " samples";
+        trainBtn.addEventListener("click", function () {
+          learnBaselineMsg("Training '" + b.profile + "'…", true);
+          $learnBaselineResult.style.color = "var(--muted)";
+          learnBaselinePost("/baselines/train", { profile: b.profile, activate: true },
+            function (d) { return "Trained + activated '" + d.profile + "' (" + d.n_samples + " samples). " + (d.fpr || ""); });
+        });
+
+        var actBtn = document.createElement("button");
+        actBtn.className = "mc-btn";
+        actBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
+        actBtn.textContent = b.active ? "Active" : "Activate";
+        actBtn.disabled = b.active || !b.has_model;
+        if (!b.has_model) actBtn.title = "train it first";
+        if (b.active) { actBtn.style.borderColor = "var(--ok)"; actBtn.style.color = "var(--ok)"; }
+        actBtn.addEventListener("click", function () {
+          learnBaselinePost("/baselines/activate", { profile: b.profile },
+            function (d) { return "Activated '" + d.active + "' as the live detector."; });
+        });
+
+        var renBtn = document.createElement("button");
+        renBtn.className = "mc-btn";
+        renBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
+        renBtn.textContent = "Rename";
+        renBtn.addEventListener("click", function () {
+          var nn = window.prompt("Rename baseline '" + b.profile + "' to:", b.profile);
+          if (!nn || nn.trim() === "" || nn.trim() === b.profile) return;
+          learnBaselinePost("/baselines/rename", { old: b.profile, new: nn.trim() },
+            function (d) { return "Renamed '" + d.renamed[0] + "' → '" + d.renamed[1] + "'."; });
+        });
+
+        row.appendChild(name);
+        row.appendChild(meta);
+        row.appendChild(trainBtn);
+        row.appendChild(actBtn);
+        row.appendChild(renBtn);
+        $learnBaselineList.appendChild(row);
+      });
+    }).catch(function () {});
+  }
 
   function learnFetchStatus() {
     fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
@@ -3087,12 +3204,15 @@
 
   learnFetchProfiles();
 
+  learnFetchBaselines();
+
   /* Periodically refresh model-status when Learning tab is visible */
   setInterval(function () {
     var learnTab = document.getElementById("tab-learning");
     if (learnTab && learnTab.classList.contains("active")) {
       learnFetchStatus();
       learnFetchProfiles();
+      learnFetchBaselines();
     }
   }, 3000);
 
@@ -3102,6 +3222,7 @@
       if (btn.getAttribute("data-tab") === "learning") {
         learnFetchHistory();
         learnFetchProfiles();
+        learnFetchBaselines();
       }
     });
   });
