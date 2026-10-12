@@ -11,9 +11,11 @@ import asyncio
 import csv
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -124,6 +126,7 @@ PLAYBACK: dict = {
 # ── calibration + anomaly history ─────────────────────────────────────────
 CALIB_BUFFER: list[list[float]] = []  # list of feature vectors
 _AUTO_CAPTURE: bool = False
+_CALIB_PROFILE: str = "default"  # profile tag used by auto-capture
 ANOMALY_HISTORY: deque[bool] = deque(maxlen=60)  # last 60 is_anomaly results
 _CALIB_CSV = Path(__file__).resolve().parent.parent / "data" / "normal_calib.csv"
 _calib_target = 150
@@ -215,7 +218,7 @@ async def _broadcast(msg: dict) -> None:
         ]
         vec = [float(msg.get(f, 0) or 0) for f in feats]
         CALIB_BUFFER.append(vec)
-        _append_calib_csv(feats, vec)
+        _append_calib_csv(feats, vec, _CALIB_PROFILE)
         calib_msg = {"type": "calib", "count": len(CALIB_BUFFER), "target": _calib_target}
         payload_calib = json.dumps(calib_msg)
         dead_calib: list[WebSocket] = []
@@ -771,14 +774,73 @@ async def _session_stop(request: Request) -> JSONResponse:
 
 
 # ── calibration helpers ───────────────────────────────────────────────────
-def _append_calib_csv(features: list[str], vec: list[float]) -> None:
+_PROFILE_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _sanitize_profile(name) -> str:
+    """Coerce a profile tag to [A-Za-z0-9_-] (empty -> 'default')."""
+    s = _PROFILE_RE.sub("", str(name or "")).strip("_")
+    return s[:64] if s else "default"
+
+
+def _calib_profile_of(header: list[str], row: list[str]) -> str:
+    """Profile tag of a normal_calib.csv row; missing column -> 'default'."""
+    if "profile" in header:
+        i = header.index("profile")
+        return _sanitize_profile(row[i]) if i < len(row) else "default"
+    if len(row) > len(header):  # new-style row appended to a legacy file
+        return _sanitize_profile(row[-1])
+    return "default"
+
+
+def _list_calib_profiles(path: Path | None = None) -> list[dict]:
+    """Group normal_calib.csv rows by profile -> [{profile, count}, ...]."""
+    path = _CALIB_CSV if path is None else path
+    counts: dict[str, int] = {}
+    if not path.is_file():
+        return []
+    with path.open(newline="") as f:
+        r = csv.reader(f)
+        try:
+            header = next(r)
+        except StopIteration:
+            return []
+        for row in r:
+            if not row:
+                continue
+            p = _calib_profile_of(header, row)
+            counts[p] = counts.get(p, 0) + 1
+    return [{"profile": p, "count": counts[p]} for p in sorted(counts)]
+
+
+def _filter_calib_csv(dest: Path, profiles: list[str] | set[str], src: Path | None = None) -> int:
+    """Write header + rows tagged with `profiles` from src into dest. Returns row count."""
+    src = _CALIB_CSV if src is None else src
+    wanted = {_sanitize_profile(p) for p in profiles}
+    n = 0
+    with src.open(newline="") as f, dest.open("w", newline="") as out:
+        r = csv.reader(f)
+        w = csv.writer(out)
+        try:
+            header = next(r)
+        except StopIteration:
+            return 0
+        w.writerow(header)
+        for row in r:
+            if row and _calib_profile_of(header, row) in wanted:
+                w.writerow(row)
+                n += 1
+    return n
+
+
+def _append_calib_csv(features: list[str], vec: list[float], profile: str = "default") -> None:
     """Append a single calibration sample to data/normal_calib.csv."""
     write_header = not _CALIB_CSV.is_file()
     with _CALIB_CSV.open("a", newline="") as f:
         w = csv.writer(f)
         if write_header:
-            w.writerow(features)
-        w.writerow([f"{v}" for v in vec])
+            w.writerow(list(features) + ["profile"])
+        w.writerow([f"{v}" for v in vec] + [_sanitize_profile(profile)])
 
 
 def _reload_detector() -> dict | None:
@@ -942,6 +1004,20 @@ async def _forest_viz(request: Request) -> JSONResponse:
 
 
 # ── calibration endpoints ─────────────────────────────────────────────────
+async def _req_body(request: Request) -> dict:
+    """Read POST body as a dict (JSON or form fields)."""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            return body
+    except Exception:
+        pass
+    try:
+        return dict(await request.form())
+    except Exception:
+        return {}
+
+
 async def _calibrate_capture(request: Request) -> JSONResponse:
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
@@ -949,6 +1025,8 @@ async def _calibrate_capture(request: Request) -> JSONResponse:
         return JSONResponse({"error": "no live sample yet"}, status_code=400)
     if len(CALIB_BUFFER) >= _calib_target:
         return JSONResponse({"error": "buffer full", "count": len(CALIB_BUFFER), "target": _calib_target}, status_code=400)
+    body = await _req_body(request)
+    profile = _sanitize_profile(body.get("profile"))
     features = DETECTOR["features"] if DETECTOR else [
         "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
         "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
@@ -956,8 +1034,15 @@ async def _calibrate_capture(request: Request) -> JSONResponse:
     ]
     vec = [float(latest_sample.get(f, 0) or 0) for f in features]
     CALIB_BUFFER.append(vec)
-    _append_calib_csv(features, vec)
-    return JSONResponse({"count": len(CALIB_BUFFER), "target": _calib_target})
+    _append_calib_csv(features, vec, profile)
+    return JSONResponse({"count": len(CALIB_BUFFER), "target": _calib_target, "profile": profile})
+
+
+async def _calibrate_profiles(request: Request) -> JSONResponse:
+    """GET /calibrate/profiles — per-profile sample counts from normal_calib.csv."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    return JSONResponse(_list_calib_profiles())
 
 
 async def _calibrate_reset(request: Request) -> JSONResponse:
@@ -976,12 +1061,30 @@ async def _calibrate_reset(request: Request) -> JSONResponse:
 async def _calibrate_train(request: Request) -> JSONResponse:
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
-    if len(CALIB_BUFFER) < _CALIB_MIN:
-        return JSONResponse({"error": f"need >= {_CALIB_MIN} samples, have {len(CALIB_BUFFER)}"}, status_code=400)
-    if not _CALIB_CSV.is_file():
-        return JSONResponse({"error": "calibration CSV not found"}, status_code=500)
-    # Run train_detector on the calibration CSV
-    cmd = _TRAIN_CMD + ["--csv", str(_CALIB_CSV), "--out", str(_MODEL_PATH)]
+    body = await _req_body(request)
+    raw = body.get("profiles")
+    selected = [_sanitize_profile(p) for p in raw] if isinstance(raw, list) else []
+    tmp_csv: Path | None = None
+    if selected:
+        if not _CALIB_CSV.is_file():
+            return JSONResponse({"error": "calibration CSV not found"}, status_code=500)
+        fd, tmp_name = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        tmp_csv = Path(tmp_name)
+        n_rows = _filter_calib_csv(tmp_csv, selected)
+        if n_rows < _CALIB_MIN:
+            tmp_csv.unlink(missing_ok=True)
+            return JSONResponse({"error": f"need >= {_CALIB_MIN} selected samples, have {n_rows}"}, status_code=400)
+        csv_path = tmp_csv
+    else:
+        if len(CALIB_BUFFER) < _CALIB_MIN:
+            return JSONResponse({"error": f"need >= {_CALIB_MIN} samples, have {len(CALIB_BUFFER)}"}, status_code=400)
+        if not _CALIB_CSV.is_file():
+            return JSONResponse({"error": "calibration CSV not found"}, status_code=500)
+        n_rows = len(CALIB_BUFFER)
+        csv_path = _CALIB_CSV
+    # Run train_detector on the (possibly filtered) calibration CSV
+    cmd = _TRAIN_CMD + ["--csv", str(csv_path), "--out", str(_MODEL_PATH)]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -993,6 +1096,9 @@ async def _calibrate_train(request: Request) -> JSONResponse:
             return JSONResponse({"error": f"train failed: {stderr.decode()[:500]}"}, status_code=500)
     except Exception as exc:
         return JSONResponse({"error": f"train exec error: {exc}"}, status_code=500)
+    finally:
+        if tmp_csv is not None:
+            tmp_csv.unlink(missing_ok=True)
     # Reload model in-process
     det = _reload_detector()
     if det is None:
@@ -1018,7 +1124,7 @@ async def _calibrate_train(request: Request) -> JSONResponse:
     profile = _read_normal_profile()
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
-        "n_samples": len(CALIB_BUFFER),
+        "n_samples": n_rows,
         "source": "calibration",
         "interval_s": args.interval,
         "features": det.get("features", []),
@@ -1028,24 +1134,23 @@ async def _calibrate_train(request: Request) -> JSONResponse:
             "n_estimators": 200,
             "contamination": det["model"].contamination if det else None,
         },
-        "note": "",
+        "note": f"profiles: {', '.join(sorted(set(selected)))}" if selected else "",
     }
     history = _load_training_history()
     history.append(entry)
     _save_training_history(history)
-    return JSONResponse({"ok": True, "fpr": fpr_str, "n_samples": len(CALIB_BUFFER)})
+    return JSONResponse({"ok": True, "fpr": fpr_str, "n_samples": n_rows})
 
 
 async def _calibrate_auto(request: Request) -> JSONResponse:
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
-    global _AUTO_CAPTURE
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    global _AUTO_CAPTURE, _CALIB_PROFILE
+    body = await _req_body(request)
     enable = body.get("enable", not _AUTO_CAPTURE)
     _AUTO_CAPTURE = bool(enable)
+    if body.get("profile") is not None:
+        _CALIB_PROFILE = _sanitize_profile(body.get("profile"))
     return JSONResponse({"auto_capture": _AUTO_CAPTURE, "count": len(CALIB_BUFFER), "target": _calib_target})
 
 
@@ -1460,6 +1565,7 @@ app = Starlette(
         Route("/calibrate/capture", _calibrate_capture, methods=["POST"]),
         Route("/calibrate/reset", _calibrate_reset, methods=["POST"]),
         Route("/calibrate/train", _calibrate_train, methods=["POST"]),
+        Route("/calibrate/profiles", _calibrate_profiles),
         Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
         Route("/calibrate/target", _calibrate_target, methods=["POST"]),
         Route("/training-history", _training_history),
@@ -1475,6 +1581,47 @@ app = Starlette(
     ],
     lifespan=_lifespan,
 )
+
+
+# ── self-check (no HTTP / no live router) ─────────────────────────────────
+def _selfcheck_calib() -> None:
+    """Assert-based demo for the profile list + filter helpers."""
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        csv_path = td_path / "normal_calib.csv"
+        with csv_path.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["throughput_tx_mbps", "retry_rate", "profile"])
+            w.writerow(["10.0", "0.01", "idle"])
+            w.writerow(["11.0", "0.02", "idle"])
+            w.writerow(["12.0", "0.03", "idle"])
+            w.writerow(["50.0", "0.10", "youtube"])
+            w.writerow(["55.0", "0.11", "youtube"])
+        profs = _list_calib_profiles(csv_path)
+        assert profs == [{"profile": "idle", "count": 3}, {"profile": "youtube", "count": 2}], profs
+
+        dest = td_path / "sel.csv"
+        n = _filter_calib_csv(dest, ["youtube"], csv_path)
+        assert n == 2, n
+        with dest.open(newline="") as f:
+            rows = list(csv.reader(f))
+        assert rows[0] == ["throughput_tx_mbps", "retry_rate", "profile"], rows[0]
+        assert len(rows) == 3, rows
+        assert all(r[2] == "youtube" for r in rows[1:]), rows
+
+        legacy = td_path / "legacy.csv"
+        with legacy.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["throughput_tx_mbps", "retry_rate"])
+            w.writerow(["10.0", "0.01"])
+            w.writerow(["11.0", "0.02"])
+        assert _list_calib_profiles(legacy) == [{"profile": "default", "count": 2}]
+        n = _filter_calib_csv(td_path / "legacy_sel.csv", ["default"], legacy)
+        assert n == 2, n
+
+        assert _sanitize_profile("triple play!/") == "tripleplay"
+        assert _sanitize_profile("") == "default"
+    print("selfcheck-calib OK")
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────
@@ -1499,6 +1646,12 @@ if __name__ == "__main__":
     p.add_argument("--bind", default="127.0.0.1")
     p.add_argument("--bfi-iface", default=None,
                     help="Monitor iface for live BFI stream (optional, parallel to telemetry)")
+    p.add_argument("--selfcheck-calib", action="store_true",
+                    help="Run calibration profile self-check and exit")
     args = p.parse_args()
+
+    if args.selfcheck_calib:
+        _selfcheck_calib()
+        raise SystemExit(0)
 
     uvicorn.run(app, host=args.bind, port=args.port, log_level="info")

@@ -1614,7 +1614,21 @@
           <button class="mc-btn stop" id="learnResetBtn">Reset</button>
         </div>
       </div>
-      <div id="learnTrainResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);"></div>
+      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div class="mc-param" style="margin:0;">
+          <label>Profile Name</label>
+          <input id="learnProfileName" type="text" value="default" maxlength="64" style="width:150px;" placeholder="default">
+        </div>
+        <button class="mc-btn" data-profile-name="idle" style="padding:6px 8px;font-size:0.56rem;">idle</button>
+        <button class="mc-btn" data-profile-name="youtube" style="padding:6px 8px;font-size:0.56rem;">youtube</button>
+        <button class="mc-btn" data-profile-name="iperf" style="padding:6px 8px;font-size:0.56rem;">iperf</button>
+        <button class="mc-btn" data-profile-name="triple-play" style="padding:6px 8px;font-size:0.56rem;">triple-play</button>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);margin-bottom:6px;">
+        TRAIN ON (checked profiles only &mdash; none checked = all):
+      </div>
+      <div id="learnProfileList" style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:0.68rem;color:var(--muted);min-height:18px;"></div>
+      <div id="learnTrainResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-top:8px;"></div>
     </div>
 
     <div class="section-label stagger">LIVE MATCH METER</div>
@@ -2723,6 +2737,42 @@
   var $learnCalibTargetN  = document.getElementById("learnCalibTargetN");
   var $learnCalibEstimate = document.getElementById("learnCalibEstimate");
   var $learnHistoryList   = document.getElementById("learnHistoryList");
+  var $learnProfileName   = document.getElementById("learnProfileName");
+  var $learnProfileList   = document.getElementById("learnProfileList");
+  var learnProfileChecked = {};  /* name -> bool, persists across refreshes */
+
+  function learnCurrentProfile() {
+    return ($learnProfileName.value || "").trim().replace(/[^A-Za-z0-9_-]/g, "") || "default";
+  }
+
+  function learnFetchProfiles() {
+    fetch("/calibrate/profiles").then(function (r) { return r.json(); }).then(function (list) {
+      $learnProfileList.innerHTML = "";
+      if (!list || list.length === 0) {
+        $learnProfileList.textContent = "no captured samples yet";
+        return;
+      }
+      list.forEach(function (p) {
+        var label = document.createElement("label");
+        label.style.cssText = "display:flex;align-items:center;gap:5px;cursor:pointer;";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!learnProfileChecked[p.profile];
+        cb.addEventListener("change", function () { learnProfileChecked[p.profile] = cb.checked; });
+        var span = document.createElement("span");
+        span.textContent = p.profile + " (" + p.count + ")";
+        label.appendChild(cb);
+        label.appendChild(span);
+        $learnProfileList.appendChild(label);
+      });
+    }).catch(function () {});
+  }
+
+  document.querySelectorAll("[data-profile-name]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      $learnProfileName.value = btn.getAttribute("data-profile-name");
+    });
+  });
 
   function learnFetchStatus() {
     fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
@@ -2837,11 +2887,16 @@
   }
 
   $learnCaptureBtn.addEventListener("click", function () {
-    fetch("/calibrate/capture", { method: "POST" })
+    fetch("/calibrate/capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: learnCurrentProfile() }),
+    })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d.error) { $learnTrainResult.textContent = "Error: " + d.error; return; }
         learnUpdateCalib(d.count, d.target);
+        learnFetchProfiles();
       })
       .catch(function (e) { $learnTrainResult.textContent = "Fetch error: " + e; });
   });
@@ -2850,12 +2905,13 @@
     fetch("/calibrate/auto", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enable: !learnAutoCapture }),
+      body: JSON.stringify({ enable: !learnAutoCapture, profile: learnCurrentProfile() }),
     })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         learnAutoCapture = d.auto_capture;
         learnUpdateCalibUI();
+        learnFetchProfiles();
       })
       .catch(function () {});
   });
@@ -2864,7 +2920,12 @@
     $learnRetrainBtn.disabled = true;
     $learnTrainResult.textContent = "Training...";
     $learnTrainResult.style.color = "var(--muted)";
-    fetch("/calibrate/train", { method: "POST" })
+    var checked = Object.keys(learnProfileChecked).filter(function (k) { return learnProfileChecked[k]; });
+    fetch("/calibrate/train", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(checked.length ? { profiles: checked } : {}),
+    })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d.error) {
@@ -2873,7 +2934,7 @@
           $learnRetrainBtn.disabled = false;
           return;
         }
-        $learnTrainResult.textContent = (d.fpr || "") + " — model reloaded";
+        $learnTrainResult.textContent = (d.fpr || "") + " — model reloaded (" + d.n_samples + " samples)";
         $learnTrainResult.style.color = "var(--ok)";
         learnFetchStatus();
         learnFetchHistory();
@@ -2893,6 +2954,8 @@
         $learnTrainResult.textContent = "";
         $learnCaptureBtn.disabled = false;
         $learnCaptureBtn.style.opacity = "";
+        learnProfileChecked = {};
+        learnFetchProfiles();
       })
       .catch(function () {});
   });
@@ -3022,11 +3085,14 @@
 
   learnFetchStatus();
 
+  learnFetchProfiles();
+
   /* Periodically refresh model-status when Learning tab is visible */
   setInterval(function () {
     var learnTab = document.getElementById("tab-learning");
     if (learnTab && learnTab.classList.contains("active")) {
       learnFetchStatus();
+      learnFetchProfiles();
     }
   }, 3000);
 
@@ -3035,6 +3101,7 @@
     btn.addEventListener("click", function () {
       if (btn.getAttribute("data-tab") === "learning") {
         learnFetchHistory();
+        learnFetchProfiles();
       }
     });
   });
