@@ -3,8 +3,17 @@
 
 Objective 1 metric: victim DOWNLINK throughput (Mbps) via iperf3 under normal
 working conditions, while toggling the BeamCraft attack binary. iperf3's TCP
-stream is both the load AND the metric — no UDP sounder needed (real TCP keeps
-the AP sounding the victim). Same RSSI-drift confound control as aba_measure.
+stream is both the load AND the metric. Same RSSI-drift confound control as
+aba_measure.
+
+CAVEAT (open, settled by the result): a *saturating* TCP flow may keep the AP's
+TX queue continuously backlogged so it rides a stale steering matrix and does
+NOT re-sound (diary: "idle gap forces re-sounding; steady saturation does NOT
+sound"). If so, the forged BFI has no fresh matrix to poison during ON -> a
+NO EFFECT here is AMBIGUOUS (sounding-suppressed, not attack-failed), NOT
+evidence the attack can't hurt throughput. A clear ON drop, conversely, PROVES
+the AP sounded under load. If NO EFFECT: switch to a bursty-download load (gaps
+force re-sounding, and it's closer to real app traffic) and re-measure.
 Run under sudo (spawns root main_su). Pure logic (parse_iperf3_json /
 phase_stats_tput / verdict_tput) is hardware free; all I/O lives in thin
 helpers orchestrated by main().
