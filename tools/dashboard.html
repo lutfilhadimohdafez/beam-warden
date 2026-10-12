@@ -1545,6 +1545,23 @@
   <!-- ======== LEARNING TAB ======== -->
   <div class="tab-section" id="tab-learning">
 
+    <details class="learn-help stagger" style="margin-bottom:18px;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:0 14px;">
+      <summary style="cursor:pointer;padding:12px 0;font-family:var(--font-mono);font-size:0.72rem;font-weight:700;letter-spacing:0.04em;color:var(--accent);list-style:none;">
+        &#9432; HOW TO USE THE LEARNING TAB <span style="color:var(--muted-dim);font-weight:400;">(click to expand)</span>
+      </summary>
+      <div style="font-family:var(--font-mono);font-size:0.7rem;line-height:1.7;color:var(--muted);padding:4px 0 16px;">
+        The detector learns what <b>normal</b> Wi-Fi looks like <i>here</i>, then flags the attack as an anomaly. Workflow:
+        <ol style="margin:10px 0 0;padding-left:20px;">
+          <li><b>Name the situation</b> &mdash; type a Profile Name (e.g. <code>my-home</code>, <code>events-20pax</code>) or tap a preset. This labels what you capture.</li>
+          <li><b>Capture normal traffic</b> &mdash; with the attack <b>OFF</b> and the link in its usual use (idle / YouTube / iperf), hit <b>Capture Current</b> for one-shot, or <b>Auto-capture</b> to log every ~2 s until the target is hit. Aim for &ge;30 samples.</li>
+          <li><b>Train a baseline</b> &mdash; in <b>Switchable Baselines</b>, click <b>Train</b> on that profile. It builds its own model and activates it.</li>
+          <li><b>Switch rooms?</b> Capture + train another profile, then <b>Activate</b> whichever matches where you are. <b>Rename</b> anytime.</li>
+          <li><b>Watch the Live Match Meter</b> &mdash; 100 % = traffic matches the learned normal. It dives when the beam-spoof attack poisons the link.</li>
+        </ol>
+        <div style="margin-top:10px;color:var(--muted-dim);">Tip: &ldquo;Retrain&rdquo; up top blends all checked profiles into one model; a <b>baseline</b> is one profile = one switchable model. Training History logs every run (deletable).</div>
+      </div>
+    </details>
+
     <div class="section-label stagger">MODEL STATUS</div>
     <div class="mc-section stagger" id="learnModelCard">
       <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:12px;">
@@ -1677,8 +1694,11 @@
 
     <div class="section-label stagger">TRAINING HISTORY</div>
     <div class="mc-section stagger">
-      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:12px;">
-        Click a row to inspect what the model learned on (feature profile + params).
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+        <span style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);">
+          Click a row to inspect what the model learned on. Hover a row for its &times; delete.
+        </span>
+        <button class="mc-btn stop" id="learnHistoryClear" style="padding:5px 12px;font-size:0.6rem;">Clear All</button>
       </div>
       <div id="learnHistoryList" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);">Loading&hellip;</div>
     </div>
@@ -3141,10 +3161,27 @@
         var fprSpan = document.createElement("span");
         fprSpan.style.cssText = "color:var(--muted-dim);";
         fprSpan.textContent = entry.training_fpr !== null ? ("FPR: " + entry.training_fpr) : "";
+        var delBtn = document.createElement("button");
+        delBtn.className = "mc-btn stop";
+        delBtn.style.cssText = "margin-left:auto;padding:2px 9px;font-size:0.62rem;line-height:1;";
+        delBtn.textContent = "×";
+        delBtn.title = "delete this run";
+        delBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();  /* don't toggle the row's detail panel */
+          fetch("/training-history/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ts: entry.ts }),
+          }).then(function (r) { return r.json(); }).then(function () {
+            learnFetchHistory();
+          }).catch(function () {});
+        });
+
         row.appendChild(tsSpan);
         row.appendChild(nSpan);
         row.appendChild(srcSpan);
         row.appendChild(fprSpan);
+        row.appendChild(delBtn);
 
         var detail = document.createElement("div");
         detail.style.cssText = "display:none;padding:10px;background:var(--panel-2);border-bottom:1px solid var(--border);font-size:0.68rem;";
@@ -3195,6 +3232,17 @@
       });
     }).catch(function () {
       $learnHistoryList.textContent = "Failed to load history.";
+    });
+  }
+
+  var $learnHistoryClear = document.getElementById("learnHistoryClear");
+  if ($learnHistoryClear) {
+    $learnHistoryClear.addEventListener("click", function () {
+      if (!window.confirm("Clear the ENTIRE training history? This can't be undone.")) return;
+      fetch("/training-history/clear", { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function () { learnFetchHistory(); })
+        .catch(function () {});
     });
   }
 

@@ -1374,6 +1374,31 @@ async def _training_history(request: Request) -> JSONResponse:
     return JSONResponse(entries)
 
 
+async def _training_history_delete(request: Request) -> JSONResponse:
+    """POST /training-history/delete {ts} — drop one entry (first match on ts)."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    body = await _req_body(request)
+    ts = body.get("ts")
+    if not ts:
+        return JSONResponse({"error": "ts required"}, status_code=400)
+    entries = _load_training_history()
+    for i, e in enumerate(entries):
+        if e.get("ts") == ts:
+            del entries[i]  # first match only, so a shared-second ts drops just one
+            _save_training_history(entries)
+            return JSONResponse({"ok": True, "remaining": len(entries)})
+    return JSONResponse({"error": f"no entry with ts {ts}"}, status_code=404)
+
+
+async def _training_history_clear(request: Request) -> JSONResponse:
+    """POST /training-history/clear — wipe the whole training log."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    _save_training_history([])
+    return JSONResponse({"ok": True, "remaining": 0})
+
+
 # ── monitor-mode endpoints ────────────────────────────────────────────────
 async def _monitor_status(request: Request) -> JSONResponse:
     """GET /monitor-status?iface=mon0 — check if iface exists and is monitor mode."""
@@ -1757,6 +1782,8 @@ app = Starlette(
         Route("/calibrate/auto", _calibrate_auto, methods=["POST"]),
         Route("/calibrate/target", _calibrate_target, methods=["POST"]),
         Route("/training-history", _training_history),
+        Route("/training-history/delete", _training_history_delete, methods=["POST"]),
+        Route("/training-history/clear", _training_history_clear, methods=["POST"]),
         Route("/monitor-status", _monitor_status),
         Route("/monitor-setup", _monitor_setup, methods=["POST"]),
         Route("/bfi-start", _bfi_start, methods=["POST"]),
