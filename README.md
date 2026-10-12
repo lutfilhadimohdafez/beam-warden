@@ -21,9 +21,17 @@ without touching the Wi-Fi protocol itself.
 
 | # | Objective | Target | Status |
 |---|-----------|--------|--------|
-| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **genuine 4×4 target (AX3200) live**; attack **validated offline** on real 4×4 HE BFI (`main_su --pcap` → `4x2 forge=null-steer`); live throughput-drop measurement pending |
-| 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — 150-sample normal dataset + live dashboard |
-| 3 | ML anomaly detection | ≥55% accuracy | 🟡 Isolation Forest built + wired; **BFI→CSI pipeline validated** (V unitary 1e-16), 98.8% on synthetic attack, and now has a **real 4×4 "normal" dataset** (56 `Nr=4` frames); real-world accuracy pending the live attack-class dataset |
+| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **DONE (clean)** — live attack on the 4×4 AX3200 cuts **downlink throughput ~48–53%** with RSSI held flat (~1 dB) and full recovery; confound-free A/B/A, `data/tput_aba_bursty_android_clean_0{1,2}.csv` |
+| 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — telnet capture + normal dataset + live dashboard |
+| 3 | ML anomaly detection | ≥55% accuracy | 🟡 **unblocked, one capture away** — Isolation Forest + evaluator built; live attack now works, so the real labelled attack telemetry is finally capturable (`telemetry_capture.py`) |
+
+**Update — 2026-10-12:** Objective 1 finished with a *clean* number — the live
+attack halves downlink throughput while signal stays flat (the earlier "−55%"
+was confounded by RSSI drift). Added a **telnet transport** to
+`telemetry_capture.py` (the 4×4 router is telnet-only) and a **`--bitrate` cap**
+to the A/B/A harness for realistic sub-saturation load. Objective 3's only
+remaining step is one paired normal/attack 11-feature capture → `eval_detector`.
+Full writeup: [`docs/progress-reports/progress-report-2026-10-12.md`](docs/progress-reports/progress-report-2026-10-12.md).
 
 **Proven on hardware this cycle:** the attacker (Alfa AWUS036ACM) injects crafted
 802.11 frames onto the target's channel (30/30 ACKs); the target emits real
