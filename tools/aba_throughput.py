@@ -174,12 +174,19 @@ def verdict_tput(off1: dict, on: dict, off2: dict, inject_count: int, drift_tol:
 # ponytail: NO -R. box(client) -> phone(server) = box -> AP -> phone = the AP's
 # beamformed DOWNLINK (what the forged BFI steers). -R would measure the phone's
 # uplink, which this attack can't touch.
-def run_iperf3_intervals(victim_ip: str, port: int, seconds: float) -> list:
-    """One iperf3 downlink run (box->phone); returns per-second Mbps."""
+def run_iperf3_intervals(victim_ip: str, port: int, seconds: float,
+                         bitrate: float | None = None) -> list:
+    """One iperf3 downlink run (box->phone); returns per-second Mbps.
+
+    bitrate (Mbps) caps the offered load with iperf3 -b so the burst does NOT
+    saturate the channel (realistic sub-saturation normal usage); None = flat out.
+    """
     cmd = [
         "iperf3", "-c", str(victim_ip), "-p", str(port),
         "-t", str(seconds), "-i", "1", "-J",
     ]
+    if bitrate:
+        cmd += ["-b", f"{bitrate}M"]
     hint = f"is `iperf3 -s` running on the phone at {victim_ip}:{port}?"
     try:
         proc = subprocess.run(
@@ -206,7 +213,7 @@ def run_iperf3_intervals(victim_ip: str, port: int, seconds: float) -> list:
 
 def measure_phase(ont, iface: str, victim_ip: str, port: int,
                   seconds: float, rssi_interval: float,
-                  burst: float, gap: float) -> dict:
+                  burst: float, gap: float, bitrate: float | None = None) -> dict:
     """Run one phase: BURSTY downlink load+metric with concurrent RSSI sampling.
 
     The phase repeats {idle gap -> short downlink burst} for `seconds`. The idle
@@ -245,7 +252,7 @@ def measure_phase(ont, iface: str, victim_ip: str, port: int,
             time.sleep(gap)  # idle gap -> AP re-sounds at next burst
             if time.monotonic() >= deadline:
                 break
-            ivals = run_iperf3_intervals(victim_ip, port, burst)
+            ivals = run_iperf3_intervals(victim_ip, port, burst, bitrate)
             # drop the slow-start second of each burst; keep the steady seconds
             tput.extend(ivals[1:] if len(ivals) > 1 else ivals)
     finally:
@@ -313,6 +320,9 @@ def main(argv=None):
                    help="length of each downlink burst")
     p.add_argument("--gap", type=float, default=0.6, metavar="sec",
                    help="idle gap before each burst (forces AP re-sounding)")
+    p.add_argument("--bitrate", type=float, default=None, metavar="Mbps",
+                   help="cap each burst's offered load (iperf3 -b) so it does NOT "
+                        "saturate the channel; omit = flat out (full channel)")
     p.add_argument("--out", default=None, metavar="csvpath")
     args = p.parse_args(argv)
 
@@ -342,7 +352,7 @@ def main(argv=None):
         print(f"[preflight] {args.mon} hearing OK ({delta} rx_packets in 2s)")
 
         # -- pre-flight c: iperf3 reachability (2s probe = tiny real run)
-        probe = run_iperf3_intervals(args.victim_ip, args.port, 2)
+        probe = run_iperf3_intervals(args.victim_ip, args.port, 2, args.bitrate)
         if not probe:
             abort(
                 f"no iperf3 throughput from {args.victim_ip}:{args.port} — "
@@ -364,7 +374,7 @@ def main(argv=None):
                 ensure_attack_dead()
                 off1 = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.off, args.rssi_interval, args.burst, args.gap,
+                    args.off, args.rssi_interval, args.burst, args.gap, args.bitrate,
                 )
                 log_phase(writer, cycle, "OFF-1", False, off1["tput"], off1["rssi"])
 
@@ -387,7 +397,7 @@ def main(argv=None):
                 proc, lines, reader_t = spawn_attack(args.mon, args.ap, args.victim)
                 on = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.on, args.rssi_interval, args.burst, args.gap,
+                    args.on, args.rssi_interval, args.burst, args.gap, args.bitrate,
                 )
                 ensure_attack_dead(proc)
                 reader_t.join(timeout=2)  # drain stdout before counting
@@ -399,7 +409,7 @@ def main(argv=None):
                 print(f"[cycle {cycle}] OFF-2 ({args.off:g}s)")
                 off2 = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.off, args.rssi_interval, args.burst, args.gap,
+                    args.off, args.rssi_interval, args.burst, args.gap, args.bitrate,
                 )
                 log_phase(writer, cycle, "OFF-2", False, off2["tput"], off2["rssi"])
 
