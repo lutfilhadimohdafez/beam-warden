@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 """Confound-aware A/B/A throughput measurement (OFF -> ON -> OFF).
 
-Objective 1 metric: victim DOWNLINK throughput (Mbps) via iperf3 under normal
-working conditions, while toggling the BeamCraft attack binary. iperf3's TCP
-stream is both the load AND the metric. Same RSSI-drift confound control as
-aba_measure.
+Objective 1 metric: victim DOWNLINK throughput (Mbps) under normal working
+conditions, while toggling the BeamCraft attack binary. Same RSSI-drift
+confound control as aba_measure.
 
-CAVEAT (open, settled by the result): a *saturating* TCP flow may keep the AP's
-TX queue continuously backlogged so it rides a stale steering matrix and does
-NOT re-sound (diary: "idle gap forces re-sounding; steady saturation does NOT
-sound"). If so, the forged BFI has no fresh matrix to poison during ON -> a
-NO EFFECT here is AMBIGUOUS (sounding-suppressed, not attack-failed), NOT
-evidence the attack can't hurt throughput. A clear ON drop, conversely, PROVES
-the AP sounded under load. If NO EFFECT: switch to a bursty-download load (gaps
-force re-sounding, and it's closer to real app traffic) and re-measure.
+DIRECTION: the AP is the beamformer; the forged BFI steers the AP's DOWNLINK
+(AP->victim). So we measure AP->phone, i.e. the phone RECEIVING. iperf3 runs
+box(client) -> phone(server) with NO -R (default: client sends to server), so
+bytes flow box -> AP -> phone = the beamformed downlink. (-R would reverse it to
+phone->box = the phone's UPLINK, which this attack cannot touch — an early
+version used -R and correctly saw NO EFFECT for that reason.)
+
+SOUNDING: a *saturating* flow keeps the AP's TX queue backlogged so it rides a
+stale steering matrix and never re-sounds (diary: "idle gap forces re-sounding;
+steady saturation does NOT sound") -> forged BFI lands on nothing. So the load
+is BURSTY: short downlink transfers separated by idle gaps, so the AP re-sounds
+at the start of each burst and the forged BFI poisons a FRESH matrix. Also
+closer to real app traffic (video buffer-fills, page loads) than a flood. The
+first (slow-start) second of each burst is dropped; the steady seconds are the
+phase's throughput samples.
+
 Run under sudo (spawns root main_su). Pure logic (parse_iperf3_json /
 phase_stats_tput / verdict_tput) is hardware free; all I/O lives in thin
 helpers orchestrated by main().
@@ -164,13 +171,14 @@ def verdict_tput(off1: dict, on: dict, off2: dict, inject_count: int, drift_tol:
 
 # ------------------------------------------------------------------ thin I/O
 
-# ponytail: iperf3 -R (reverse) = downlink = the beamformed metric — the TCP
-# stream is both the normal-usage load and the measurement.
+# ponytail: NO -R. box(client) -> phone(server) = box -> AP -> phone = the AP's
+# beamformed DOWNLINK (what the forged BFI steers). -R would measure the phone's
+# uplink, which this attack can't touch.
 def run_iperf3_intervals(victim_ip: str, port: int, seconds: float) -> list:
-    """One iperf3 reverse (downlink) run; returns per-second Mbps."""
+    """One iperf3 downlink run (box->phone); returns per-second Mbps."""
     cmd = [
         "iperf3", "-c", str(victim_ip), "-p", str(port),
-        "-R", "-t", str(seconds), "-i", "1", "-J",
+        "-t", str(seconds), "-i", "1", "-J",
     ]
     hint = f"is `iperf3 -s` running on the phone at {victim_ip}:{port}?"
     try:
@@ -197,12 +205,18 @@ def run_iperf3_intervals(victim_ip: str, port: int, seconds: float) -> list:
 
 
 def measure_phase(ont, iface: str, victim_ip: str, port: int,
-                  seconds: float, rssi_interval: float) -> dict:
-    """Run one phase: iperf3 downlink load+metric with concurrent RSSI sampling.
+                  seconds: float, rssi_interval: float,
+                  burst: float, gap: float) -> dict:
+    """Run one phase: BURSTY downlink load+metric with concurrent RSSI sampling.
+
+    The phase repeats {idle gap -> short downlink burst} for `seconds`. The idle
+    gap lets the AP mark the steering matrix stale so it RE-SOUNDS at the start
+    of each burst (where the forged BFI gets ingested); the burst measures the
+    resulting downlink throughput. The first (slow-start) second of each burst
+    is dropped so the ramp doesn't deflate the samples.
 
     A daemon thread samples rssi_primary every rssi_interval via
-    `iwpriv <iface> stat` (skipping rssi==0 parse-misses) while the main
-    thread blocks in run_iperf3_intervals for the phase duration.
+    `iwpriv <iface> stat` (skipping rssi==0 parse-misses) throughout.
     Returns {"tput": [mbps...], "rssi": [primary...]}.
     """
     stop = threading.Event()
@@ -224,8 +238,16 @@ def measure_phase(ont, iface: str, victim_ip: str, port: int,
 
     sampler = threading.Thread(target=sample_rssi, daemon=True)
     sampler.start()
+    tput = []
     try:
-        tput = run_iperf3_intervals(victim_ip, port, seconds)
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            time.sleep(gap)  # idle gap -> AP re-sounds at next burst
+            if time.monotonic() >= deadline:
+                break
+            ivals = run_iperf3_intervals(victim_ip, port, burst)
+            # drop the slow-start second of each burst; keep the steady seconds
+            tput.extend(ivals[1:] if len(ivals) > 1 else ivals)
     finally:
         stop.set()
         sampler.join(timeout=rssi_interval + 2)
@@ -287,6 +309,10 @@ def main(argv=None):
     p.add_argument("--drift-tol", type=float, default=3.0, metavar="dB",
                    help="median RSSI drift across OFF phases (or ON-vs-OFF gap) above this = CONFOUNDED")
     p.add_argument("--rssi-interval", type=float, default=1.5, metavar="sec")
+    p.add_argument("--burst", type=float, default=3.0, metavar="sec",
+                   help="length of each downlink burst")
+    p.add_argument("--gap", type=float, default=0.6, metavar="sec",
+                   help="idle gap before each burst (forces AP re-sounding)")
     p.add_argument("--out", default=None, metavar="csvpath")
     args = p.parse_args(argv)
 
@@ -338,7 +364,7 @@ def main(argv=None):
                 ensure_attack_dead()
                 off1 = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.off, args.rssi_interval,
+                    args.off, args.rssi_interval, args.burst, args.gap,
                 )
                 log_phase(writer, cycle, "OFF-1", False, off1["tput"], off1["rssi"])
 
@@ -361,7 +387,7 @@ def main(argv=None):
                 proc, lines, reader_t = spawn_attack(args.mon, args.ap, args.victim)
                 on = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.on, args.rssi_interval,
+                    args.on, args.rssi_interval, args.burst, args.gap,
                 )
                 ensure_attack_dead(proc)
                 reader_t.join(timeout=2)  # drain stdout before counting
@@ -373,7 +399,7 @@ def main(argv=None):
                 print(f"[cycle {cycle}] OFF-2 ({args.off:g}s)")
                 off2 = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
-                    args.off, args.rssi_interval,
+                    args.off, args.rssi_interval, args.burst, args.gap,
                 )
                 log_phase(writer, cycle, "OFF-2", False, off2["tput"], off2["rssi"])
 
