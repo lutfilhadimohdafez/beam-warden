@@ -514,6 +514,7 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     params.setdefault("channel", "auto")  # monitor bandwidth; other tasks ignore it
     params.setdefault("victim_ip", "192.168.31.158")  # throughput_test iperf server
     params.setdefault("bitrate", "0")  # 0 = unleash (full channel, no load cap)
+    params.setdefault("alpha", "1.0")  # attack strength; 1.0 = current behavior (A/B/A repro)
     (Path(__file__).resolve().parent.parent / "results" / "sessions").mkdir(parents=True, exist_ok=True)
 
     cmd = resolve_cmd(name, params)

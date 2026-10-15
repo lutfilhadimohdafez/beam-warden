@@ -323,6 +323,8 @@ def main(argv=None):
     p.add_argument("--bitrate", type=float, default=None, metavar="Mbps",
                    help="cap each burst's offered load (iperf3 -b) so it does NOT "
                         "saturate the channel; omit = flat out (full channel)")
+    p.add_argument("--alpha", type=float, default=1.0,
+                   help="attack strength passed to main_su (0=off .. 1=max)")
     p.add_argument("--out", default=None, metavar="csvpath")
     args = p.parse_args(argv)
 
@@ -399,7 +401,7 @@ def main(argv=None):
                     pass
 
                 print(f"[cycle {cycle}] ON ({args.on:g}s)")
-                proc, lines, reader_t = spawn_attack(args.mon, args.ap, args.victim)
+                proc, lines, reader_t = spawn_attack(args.mon, args.ap, args.victim, alpha=args.alpha)
                 on = measure_phase(
                     ont, args.iface, args.victim_ip, args.port,
                     args.on, args.rssi_interval, args.burst, args.gap, args.bitrate,

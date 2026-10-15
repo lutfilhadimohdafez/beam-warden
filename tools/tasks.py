@@ -279,16 +279,21 @@ TASK_REGISTRY: dict[str, dict] = {
         "description": "Launch BeamCraft beamforming-spoofing attack (flood 1 = strongest; see note).",
     },
     "throughput_test": {
-        "label": "Throughput Test (A/B/A)",
+        "label": "BeamCraft Attack — Burst Throughput (A/B/A)",
         "cmd": [
             # sys.executable = the venv python (has telnet/3.14 deps); an absolute
             # path survives pkexec's reset PATH, unlike bare "python".
-            sys.executable, str(_TOOLS / "aba_throughput.py"),
+            # -u: force unbuffered stdout. stdbuf (in dashboard _run_task) only
+            # line-buffers libc stdio; Python does its OWN block-buffering over a
+            # pipe, and pkexec strips PYTHONUNBUFFERED, so the console stayed EMPTY
+            # until the run finished. -u is an argv flag -> survives pkexec.
+            sys.executable, "-u", str(_TOOLS / "aba_throughput.py"),
             "--mon", "{mon}",
             "--ap", "{ap}",
             "--victim", "{victim}",
             "--victim-ip", "{victim_ip}",
             "--bitrate", "{bitrate}",  # 0 = unleash (full channel, no load cap)
+            "--alpha", "{alpha}",  # attack strength passed to main_su (0=off .. 1=max)
             "--out", str(_ROOT / "results" / "sessions" / "{run}_tput.csv"),
         ],
         "privileged": True,

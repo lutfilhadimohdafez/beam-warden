@@ -158,6 +158,142 @@ This is the algorithm implemented in `BeamCraft_AE/main_su.cpp :: re_beamforming
 (VHT) and, identically, in the **Wi-BFI** reference (HE) — same rotations, only
 `Nsc`, the bit-widths, and the frame offset differ per §2.
 
+### 3.1 Decomposing a 2×2 matrix — Wi-Fi 5 (VHT) vs Wi-Fi 6 (HE), worked
+
+> **Why 2×2 is the whole story for us.** `Nc` = number of spatial streams the AP
+> steers = **columns of V**. A normal user device (phone/laptop) reports **Nc = 2**.
+> We verified this against *every* captured frame in this repo: **587 / 587 BFI
+> reports have `Nc = 2`** (`data/bfi_*features.csv`). Only `Nr` (the reporter's
+> antenna count = **rows**) varies — `Nr = 2` for a 2-antenna client (→ **square
+> 2×2**), `Nr = 4` only when a 4-antenna reporter sounds. So the target case is
+> always `Nr = Nc = 2`: a **square, full-rank** feedback matrix.
+
+**Consequence of squareness (`Nr = Nc`): there is no null space.** The columns of a
+2×2 `V` already span the whole 2-D space, so you *cannot* build a vector orthogonal
+to `V` (the Gram–Schmidt trick in §4 needs `Nr > Nc` to have empty directions to
+aim into). The square-case forge is therefore a **rotation of V onto itself**, not a
+null-steer — see the note at the end.
+
+**The decompose is IDENTICAL for Wi-Fi 5 and Wi-Fi 6 at 2×2.** Same 2 angles, same
+reconstruction. Only the *frame wrapper* differs. Side-by-side:
+
+| | **Wi-Fi 5 — 802.11ac (VHT)** | **Wi-Fi 6 — 802.11ax (HE)** |
+|---|---|---|
+| Action frame | VHT Compressed Beamforming, **category 21** | HE Compressed Beamforming/CQI, **category 30** |
+| MIMO Control field | **3 bytes** (24-bit) | **5 bytes** (40-bit) |
+| `Nc Index` (→ `Nc = idx+1`) | bits **0–2** | bits **0–2** |
+| `Nr Index` (→ `Nr = idx+1`) | bits **3–5** | bits **3–5** |
+| Channel Width / BW | bits 6–7 (20/40/80/160) | bits 6–7 (20/40/80/160) |
+| Grouping `Ng` | bits 8–9: `Ng ∈ {1,2,4}` | bit 8: `Ng ∈ {4,16}` |
+| Codebook info | bit 10 | bit **9** |
+| Feedback type (SU/MU) | bit 11 (**1 bit**: 0=SU,1=MU) | bits **10–11** (2 bits: 0=SU,1=MU,2=CQI) |
+| Sounding dialog token | bits 16–21 | bits 30–35 |
+| Report bytes follow at | after the 3-byte field | after the 5-byte field |
+| **# angles for 2×2 (`NANG`)** | **2** (`φ₁₁`, `ψ₂₁`) | **2** (`φ₁₁`, `ψ₂₁`) |
+| **Angle order** | `φ₁₁`, `ψ₂₁` | `φ₁₁`, `ψ₂₁` |
+| **Bit-widths** (SU, codebook 0) | `b_φ = 4`, `b_ψ = 2` | `b_φ = 4`, `b_ψ = 2` |
+| **Bit-widths** (SU, codebook 1) | `b_φ = 6`, `b_ψ = 4` | `b_φ = 6`, `b_ψ = 4` |
+| **Bit-widths** (MU, codebook 0/1) | `7/5` · `9/7` | `7/5` · `9/7` |
+
+> Field bit positions above are exactly what the repo's decoder reads — HE in
+> `tools/bfi_features.py` (`nc=val&0x7`, `nr=(val>>3)&0x7`, `codebook=(val>>9)&1`,
+> `feedback_type=(val>>10)&0x3`); bit-widths in `main_su.cpp :: get_bitwidths()`.
+
+**Dequantize the 2 angles** (authoritative form, from `main_su.cpp`; `q` = the raw
+integer read from the `b_φ`/`b_ψ` bit field):
+
+```
+    φ₁₁ = π · (2·q_φ + 1) / 2^(b_φ)          ∈ (0, 2π)
+    ψ₂₁ = π · (2·q_ψ + 1) / 2^(b_ψ + 2)      ∈ (0, π/2)
+```
+
+**Reconstruct V (closed form for 2×2).** With `D = diag(e^{jφ₁₁}, 1)` and a single
+Givens rotation `G₂₁(ψ₂₁)`, `Ṽ = D · G₂₁ᵀ · I₂ₓ₂` collapses to:
+
+```
+          ┌  e^{jφ₁₁}·cos ψ ,  − e^{jφ₁₁}·sin ψ  ┐
+    V  =  │                                      │        (ψ ≡ ψ₂₁)
+          └      sin ψ      ,        cos ψ        ┘
+```
+
+The second row is real by construction (why only `Nr−1` rows carry `φ`). Columns are
+orthonormal → `VᴴV = I` → it passes the AP's PHY sanity check.
+
+**Worked example** (SU, codebook 1 → `b_φ=6, b_ψ=4`; raw `q_φ=20, q_ψ=5`):
+
+```
+    φ = π·(41)/64 = 2.013 rad (115.3°)    e^{jφ} = −0.428 + j0.904
+    ψ = π·(11)/64 = 0.540 rad ( 30.9°)    cos ψ = 0.858 , sin ψ = 0.514
+
+          ┌  −0.367 + j0.776 ,   0.220 − j0.465  ┐
+    V  =  │                                       │   (check: ‖col‖=1, cols ⟂)
+          └       0.514       ,       0.858       ┘
+```
+
+**The 2×2 forge (square branch, already in the code).** Because there is no null
+space, the attack rotates `V` onto itself by `θ = α·(π/2)`:
+
+```
+    W = V · R(θ) ,   R(θ) = ┌ cos θ  −sin θ ┐ ,   θ = α · π/2
+                            └ sin θ   cos θ ┘
+    α = 0 → θ = 0  → R = I   → W = V       (honest, no attack)
+    α = 1 → θ = 90° → swap   → stream 1's energy sent along stream 2's direction
+```
+
+This is `BeamCraft_AE/main_su.cpp:200-207` (`bool degenerate = (Nr == Nc)`), knob
+`--alpha`. Sweeping `--alpha 0 → 1` on a 2×2 victim yields a clean monotone
+throughput-vs-`α` curve (one angle, one knob). Real 2×2 HE reports to practise the
+decode on: `data/bfi_he_capture.pcap`, `data/bfi_features.csv` (all `Nc=2`).
+
+### 3.2 Decomposing a 4×2 matrix (Wi-Fi 5 & 6) — the tall case
+
+A 4-antenna reporter (`Nr=4`) with 2 streams (`Nc=2`) gives a **tall** `4×2` matrix.
+This appears in our captures only from a 4-antenna sounder (e.g. the AX3200 4×4 AP;
+`data/bfi_ax3200_4x4_features.csv` — all `4×2`). The **frame wrapper is identical to
+§3.1** (same VHT-vs-HE table, same categories/field sizes); only the *geometry-
+dependent* part changes.
+
+**Angles — `NANG = 10`** (vs 2 for square), computed as
+`Σ_{i=1}^{min(Nc,Nr−1)} 2·(Nr−i) = 2·3 + 2·2 = 10` → **5 φ + 5 ψ**, packed in this
+order (from §3):
+
+```
+    φ₁₁, φ₂₁, φ₃₁, ψ₂₁, ψ₃₁, ψ₄₁, φ₂₂, φ₃₂, ψ₃₂, ψ₄₂
+```
+
+Bit-widths and the dequant formulas are the **same as §3.1** (they depend on SU/MU +
+codebook, not geometry). Dequant each `q` the same way:
+`φ = π·(2q_φ+1)/2^{b_φ}`, `ψ = π·(2q_ψ+1)/2^{b_ψ+2}`.
+
+**Reconstruct V (4×2)** — two column-stages of a diagonal phase matrix times Givens
+rotations, then the first 2 identity columns:
+
+```
+    Ṽ = [ D₁ · G₂₁ᵀ · G₃₁ᵀ · G₄₁ᵀ ] · [ D₂ · G₃₂ᵀ · G₄₂ᵀ ] · Ĩ(4×2)
+
+    D₁ = diag(e^{jφ₁₁}, e^{jφ₂₁}, e^{jφ₃₁}, 1)      D₂ = diag(1, e^{jφ₂₂}, e^{jφ₃₂}, 1)
+    Gₗᵢ(ψ) = I₄ with a [cos ψ, sin ψ; −sin ψ, cos ψ] block in the (i,ℓ) plane
+```
+
+The result is `4×2` with orthonormal columns: **2 steered directions living in 4-D
+space**, so there is a **2-D left-over null space** (`Nr − Nc = 2`). Worked example of
+one angle (SU, codebook 1, `b_ψ=4`, raw `q_ψ=5`): `ψ₂₁ = π·11/64 = 30.9°`; the full
+10-angle → 4×2 build is exactly `BeamCraft_AE/main_su.cpp :: reconstruct_V()` (loop
+over the same angle order) — use it as the reference implementation.
+
+**Forge (tall case = null-steer, not rotation).** *Because* that 2-D null space exists,
+the attack aims energy into it: `Wₖ = √(1−α)·Vₖ + √α·V_perp`, with `V_perp` from
+Gram–Schmidt on a random matrix projected out of V's column space (§4). This is the
+`else` branch at `main_su.cpp:208-225` — contrast the 2×2 rotation branch (§3.1). So:
+
+| geometry | null space | forge | code branch |
+|---|---|---|---|
+| **2×2** (`Nr=Nc`) | none (`dim 0`) | rotate V onto itself, `θ=α·90°` | `main_su.cpp:200-207` |
+| **4×2** (`Nr>Nc`) | `dim 2` | blend in `V_perp` (Gram-Schmidt) | `main_su.cpp:208-225` |
+
+Both Wi-Fi 5 and Wi-Fi 6 use this same 4×2 math; only the frame wrapper (§3.1 table)
+differs. Practise the 4×2 decode on `data/bfi_ax3200_4x4.pcap`.
+
 ---
 
 ## 4. The attack: forging BFI (BeamCraft)

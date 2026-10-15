@@ -759,6 +759,88 @@
   }
   .mc-param input:focus { border-color: var(--border-light); box-shadow: 0 0 0 2px rgba(255,255,255,0.06); }
 
+  /* Alpha slider + live readout */
+  .mc-param input[type="range"] {
+    width: 160px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    accent-color: var(--accent);
+  }
+  .mc-param input[type="range"]:focus { box-shadow: none; }
+  .mc-val {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: none;
+  }
+  .mc-hint {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: var(--muted-dim);
+    max-width: 280px;
+    line-height: 1.5;
+  }
+
+  /* ---- Geometry badge (live, parsed from main_su console lines) ---- */
+  .geo-badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 3px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--panel-2);
+    margin-bottom: 12px;
+  }
+  .geo-badge.square { color: var(--ok); border-color: var(--ok); background: var(--ok-dim); }
+  .geo-badge.tall { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+  /* ---- HOW-TO-USE overlay (full-screen help modal; above grain at 9999) ---- */
+  .help-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+  }
+  .help-overlay.visible { display: flex; }
+  .help-overlay .help-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); }
+  .help-overlay .modal-box {
+    max-width: min(1100px, 92vw);
+    width: 92vw;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+  .help-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 1.35rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+  .help-close:hover { color: var(--accent); }
+  .help-body {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.7;
+    color: var(--muted);
+    columns: 2 320px;
+    column-gap: 36px;
+    padding: 4px 0 8px;
+  }
+
   .mc-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1497,8 +1579,9 @@
           <input id="mcBitrate" value="" placeholder="blank = unleash">
         </div>
         <div class="mc-param">
-          <label>Alpha</label>
-          <input id="mcAlpha" value="1.0" placeholder="1.0">
+          <label>Alpha <span class="mc-val" id="mcAlphaVal">1.0</span></label>
+          <input type="range" id="mcAlpha" min="0" max="1" step="0.05" value="1.0">
+          <span class="mc-hint">0 = off (honest feedback) &middot; 1 = max disruption (beam steered 90&deg; wrong)</span>
         </div>
         <div class="mc-param">
           <label>Offset</label>
@@ -1525,6 +1608,7 @@
           <input id="mcRun" value="" placeholder="run_001">
         </div>
       </div>
+      <div><span id="mcGeoBadge" class="geo-badge">Geometry: &mdash;</span></div>
       <div class="mc-grid" id="mcGrid">
         <div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">Loading tasks&hellip;</div>
       </div>
@@ -1545,22 +1629,11 @@
   <!-- ======== LEARNING TAB ======== -->
   <div class="tab-section" id="tab-learning">
 
-    <details class="learn-help stagger" style="margin-bottom:18px;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:0 14px;">
-      <summary style="cursor:pointer;padding:12px 0;font-family:var(--font-mono);font-size:0.72rem;font-weight:700;letter-spacing:0.04em;color:var(--accent);list-style:none;">
+    <div class="learn-help stagger" style="margin-bottom:18px;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:0 14px;">
+      <button type="button" id="learnHelpOpen" style="cursor:pointer;padding:12px 0;font-family:var(--font-mono);font-size:0.72rem;font-weight:700;letter-spacing:0.04em;color:var(--accent);background:none;border:none;width:100%;text-align:left;">
         &#9432; HOW TO USE THE LEARNING TAB <span style="color:var(--muted-dim);font-weight:400;">(click to expand)</span>
-      </summary>
-      <div style="font-family:var(--font-mono);font-size:0.7rem;line-height:1.7;color:var(--muted);padding:4px 0 16px;">
-        The detector learns what <b>normal</b> Wi-Fi looks like <i>here</i>, then flags the attack as an anomaly. Workflow:
-        <ol style="margin:10px 0 0;padding-left:20px;">
-          <li><b>Name the situation</b> &mdash; type a Profile Name (e.g. <code>my-home</code>, <code>events-20pax</code>) or tap a preset. This labels what you capture.</li>
-          <li><b>Capture normal traffic</b> &mdash; with the attack <b>OFF</b> and the link in its usual use (idle / YouTube / iperf), hit <b>Capture Current</b> for one-shot, or <b>Auto-capture</b> to log every ~2 s until the target is hit. Aim for &ge;30 samples.</li>
-          <li><b>Train a baseline</b> &mdash; in <b>Switchable Baselines</b>, click <b>Train</b> on that profile. It builds its own model and activates it.</li>
-          <li><b>Switch rooms?</b> Capture + train another profile, then <b>Activate</b> whichever matches where you are. <b>Rename</b> anytime.</li>
-          <li><b>Watch the Live Match Meter</b> &mdash; 100 % = traffic matches the learned normal. It dives when the beam-spoof attack poisons the link.</li>
-        </ol>
-        <div style="margin-top:10px;color:var(--muted-dim);">Tip: &ldquo;Retrain&rdquo; up top blends all checked profiles into one model; a <b>baseline</b> is one profile = one switchable model. Training History logs every run (deletable).</div>
-      </div>
-    </details>
+      </button>
+    </div>
 
     <div class="section-label stagger">MODEL STATUS</div>
     <div class="mc-section stagger" id="learnModelCard">
@@ -1748,6 +1821,26 @@
     <div class="modal-actions">
       <button class="modal-btn" id="modalCancel">Cancel</button>
       <button class="modal-btn primary" id="modalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- HOW-TO-USE OVERLAY (Learning tab help; direct child of body so no ancestor overflow/transform can trap it) -->
+<div class="help-overlay" id="learnHelpOverlay">
+  <div class="help-backdrop" id="learnHelpBackdrop"></div>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="learnHelpTitle" style="position:relative;">
+    <button type="button" class="help-close" id="learnHelpClose" aria-label="Close">&times;</button>
+    <div class="modal-title" id="learnHelpTitle">&#9432; HOW TO USE THE LEARNING TAB</div>
+    <div class="help-body">
+      The detector learns what <b>normal</b> Wi-Fi looks like <i>here</i>, then flags the attack as an anomaly. Workflow:
+      <ol style="margin:10px 0 0;padding-left:20px;break-inside:avoid;">
+        <li><b>Name the situation</b> &mdash; type a Profile Name (e.g. <code>my-home</code>, <code>events-20pax</code>) or tap a preset. This labels what you capture.</li>
+        <li><b>Capture normal traffic</b> &mdash; with the attack <b>OFF</b> and the link in its usual use (idle / YouTube / iperf), hit <b>Capture Current</b> for one-shot, or <b>Auto-capture</b> to log every ~2 s until the target is hit. Aim for &ge;30 samples.</li>
+        <li><b>Train a baseline</b> &mdash; in <b>Switchable Baselines</b>, click <b>Train</b> on that profile. It builds its own model and activates it.</li>
+        <li><b>Switch rooms?</b> Capture + train another profile, then <b>Activate</b> whichever matches where you are. <b>Rename</b> anytime.</li>
+        <li><b>Watch the Live Match Meter</b> &mdash; 100 % = traffic matches the learned normal. It dives when the beam-spoof attack poisons the link.</li>
+      </ol>
+      <div style="margin-top:10px;color:var(--muted-dim);">Tip: &ldquo;Retrain&rdquo; up top blends all checked profiles into one model; a <b>baseline</b> is one profile = one switchable model. Training History logs every run (deletable).</div>
     </div>
   </div>
 </div>
@@ -2462,6 +2555,16 @@
     };
   }
 
+  /* Alpha slider live readout */
+  var $mcAlpha = document.getElementById("mcAlpha");
+  var $mcAlphaVal = document.getElementById("mcAlphaVal");
+  if ($mcAlpha && $mcAlphaVal) {
+    $mcAlpha.addEventListener("input", function () {
+      var v = parseFloat($mcAlpha.value);
+      $mcAlphaVal.textContent = (Math.round(v * 100) % 10 === 0) ? v.toFixed(1) : v.toFixed(2);
+    });
+  }
+
   /* ---- AP air-scan (passive beacon scan on the monitored channel) ---- */
   var $mcScanAps = document.getElementById("mcScanAps");
   var $mcApList  = document.getElementById("mcApList");
@@ -2684,7 +2787,33 @@
     }
   }
 
+  var $mcGeoBadge = document.getElementById("mcGeoBadge");
+
+  function setGeoBadge(nr, nc, mode) {
+    if (!$mcGeoBadge) return;
+    var square = nr === nc;
+    var txt = "Geometry: " + nr + "\u00d7" + nc +
+      (square ? "  (square \u00b7 rotation forge)" : "  (tall \u00b7 null-steer forge)");
+    if (mode) txt += " \u00b7 forge=" + mode;
+    $mcGeoBadge.textContent = txt;
+    $mcGeoBadge.className = "geo-badge " + (square ? "square" : "tall");
+  }
+
+  function resetGeoBadge() {
+    if (!$mcGeoBadge) return;
+    $mcGeoBadge.textContent = "Geometry: \u2014";
+    $mcGeoBadge.className = "geo-badge";
+  }
+
+  function parseGeoLine(line) {
+    var m = /Detected:\s*(\d+)x(\d+)\b.*\bforge=(\S+)/.exec(line);
+    if (m) { setGeoBadge(parseInt(m[1], 10), parseInt(m[2], 10), m[3]); return; }
+    m = /\bNr=(\d+)\s+Nc=(\d+)\b/.exec(line);
+    if (m) { setGeoBadge(parseInt(m[1], 10), parseInt(m[2], 10), null); }
+  }
+
   function appendConsole(task, stream, line) {
+    parseGeoLine(line);
     var div = document.createElement("div");
     div.className = "console-line " + (stream === "err" ? "err" : "out");
     var tag = document.createElement("span");
@@ -2719,6 +2848,24 @@
     $consoleBody.innerHTML = "";
   });
 
+  /* HOW-TO-USE overlay open/close */
+  var $learnHelpOverlay = document.getElementById("learnHelpOverlay");
+  var $learnHelpOpen = document.getElementById("learnHelpOpen");
+  var $learnHelpClose = document.getElementById("learnHelpClose");
+  var $learnHelpBackdrop = document.getElementById("learnHelpBackdrop");
+  if ($learnHelpOpen) $learnHelpOpen.addEventListener("click", function () {
+    $learnHelpOverlay.classList.add("visible");
+  });
+  if ($learnHelpClose) $learnHelpClose.addEventListener("click", function () {
+    $learnHelpOverlay.classList.remove("visible");
+  });
+  if ($learnHelpBackdrop) $learnHelpBackdrop.addEventListener("click", function () {
+    $learnHelpOverlay.classList.remove("visible");
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") $learnHelpOverlay.classList.remove("visible");
+  });
+
   /* Run / Stop button clicks (event delegation) */
   $mcGrid.addEventListener("click", function (e) {
     var btn = e.target.closest(".mc-btn");
@@ -2726,6 +2873,7 @@
     var action = btn.getAttribute("data-action");
     var name = btn.getAttribute("data-task");
     if (action === "run") {
+      if (name === "start_attack" || name === "throughput_test") resetGeoBadge();
       fetch("/run/" + name, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -211,10 +211,10 @@ def start_sounder(victim_ip: str, stop_event: threading.Event) -> threading.Thre
     return t
 
 
-def spawn_attack(mon: str, ap: str, victim: str):
+def spawn_attack(mon: str, ap: str, victim: str, alpha: float = 1.0):
     cmd = [
         str(ATTACK_BIN), "--iface", mon, "--ap", ap, "--victim", victim,
-        "--alpha", "1.0", "--type", "0xe0", "--offset", "33",
+        "--alpha", str(alpha), "--type", "0xe0", "--offset", "33",
     ]
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
