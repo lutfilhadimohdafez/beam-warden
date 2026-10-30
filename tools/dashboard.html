@@ -1984,6 +1984,7 @@
   /* ---- Router profiles: pick instead of memorizing creds ---- */
   /* creds come from /router-profiles (gitignored routers.local.json) — never baked into this page */
   var ROUTER_PROFILES = [];
+  var SELECTED_DRIVER = "";  /* "mt76" (ImmortalWrt/SSH) or "" (stock MTK/telnet) */
   var $sessionProfile = document.getElementById("sessionProfile");
   function applyProfile(p) {
     if (!p) return;  /* "custom" → leave fields as-is for manual entry */
@@ -1991,6 +1992,7 @@
     document.getElementById("sessionUser").value = p.user || "";
     document.getElementById("sessionPassword").value = p.password || "";
     document.getElementById("sessionIface").value = p.iface || "";
+    SELECTED_DRIVER = p.driver || "";
     var bfi = document.getElementById("sessionBfiIface");
     if (bfi && p.bfi) bfi.value = p.bfi;
   }
@@ -2113,6 +2115,7 @@
         password: document.getElementById("sessionPassword").value,
         iface: document.getElementById("sessionIface").value.trim(),
         bfi_iface: document.getElementById("sessionBfiIface").value.trim(),
+        driver: SELECTED_DRIVER || "",
       }).then(function (d) {
         if (d && d.ok) {
           liveConnected = true;

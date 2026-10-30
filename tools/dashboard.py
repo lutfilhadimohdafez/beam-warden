@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gn630v_telemetry import compute_deltas, parse_iwpriv_stat, read_iface_bytes
 from gn630v_telnet import GN630V
+from mt76_telemetry import SSHConn, parse_iw_station_dump
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
@@ -288,20 +289,29 @@ async def _producer_live() -> None:
 
     while True:
         try:
+            mt76 = getattr(args, "driver", "") == "mt76"
             if ont is None:
+                conn_cls = SSHConn if mt76 else GN630V
                 ont = await asyncio.to_thread(
-                    GN630V, args.host, args.user, args.password
+                    conn_cls, args.host, args.user, args.password
                 )
                 await asyncio.to_thread(ont.__enter__)
 
             tick = time.time()
-            text = await asyncio.to_thread(ont.run, f"iwpriv {args.iface} stat")
-            parsed = await asyncio.to_thread(parse_iwpriv_stat, text)
-            tx_b, rx_b = await asyncio.to_thread(read_iface_bytes, ont, args.iface)
-            if tx_b:
-                parsed["bytes_sent"] = tx_b
-            if rx_b:
-                parsed["bytes_recv"] = rx_b
+            if mt76:
+                # ImmortalWrt / open mt76: no iwpriv. station dump carries RSSI,
+                # MCS, retries AND byte counters, so no read_iface_bytes override.
+                text = await asyncio.to_thread(
+                    ont.run, f"iw dev {args.iface} station dump")
+                parsed = await asyncio.to_thread(parse_iw_station_dump, text)
+            else:
+                text = await asyncio.to_thread(ont.run, f"iwpriv {args.iface} stat")
+                parsed = await asyncio.to_thread(parse_iwpriv_stat, text)
+                tx_b, rx_b = await asyncio.to_thread(read_iface_bytes, ont, args.iface)
+                if tx_b:
+                    parsed["bytes_sent"] = tx_b
+                if rx_b:
+                    parsed["bytes_recv"] = rx_b
             now = time.time()
 
             if prev is not None and prev_t is not None:
@@ -653,10 +663,16 @@ def kill_comm(entry: dict) -> str | None:
 
 
 # ── runtime session endpoints ─────────────────────────────────────────────
-async def _test_router_connection(host: str, user: str, password: str) -> None:
-    """Quick pre-connect test: open GN630V then close. Raises on failure."""
+async def _test_router_connection(host: str, user: str, password: str,
+                                  driver: str = "") -> None:
+    """Quick pre-connect test: open the transport then close. Raises on failure.
+
+    driver=="mt76" → SSH (ImmortalWrt/open mt76); else telnet GN630V (stock MTK).
+    """
     def _probe():
-        with GN630V(host, user, password):
+        conn = SSHConn(host, user, password) if driver == "mt76" \
+            else GN630V(host, user, password)
+        with conn:
             pass
     await asyncio.to_thread(_probe)
 
@@ -733,9 +749,11 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         args.user = body.get("user", args.user)
         args.password = body.get("password", args.password)
         args.iface = body.get("iface", args.iface)
+        args.driver = body.get("driver", getattr(args, "driver", "")) or ""
         # Quick pre-connect test before starting the producer
         try:
-            await _test_router_connection(args.host, args.user, args.password)
+            await _test_router_connection(args.host, args.user, args.password,
+                                          args.driver)
         except Exception as exc:
             return JSONResponse(
                 {"ok": False, "error": str(exc)},
