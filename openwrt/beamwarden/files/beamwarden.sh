@@ -22,6 +22,9 @@ MAC="${MAC:-}"                       # client MAC to protect; empty = aggregate 
 WIN="${WIN:-2}"
 CAL_SECONDS="${CAL_SECONDS:-120}"
 HITS_TO_ALARM="${HITS_TO_ALARM:-3}"  # consecutive attack windows before alerting
+ACTIVE_MIN_PKTS="${ACTIVE_MIN_PKTS:-100}"  # skip detection when the link is idle (no
+                                     # traffic -> throughput 0 looks like a collapse);
+                                     # the model only knows under-load normal vs attack
 RETRY_MULT="${RETRY_MULT:-1.5}"      # fallback threshold only (no model.awk)
 RETRY_FLOOR="${RETRY_FLOOR:-0.30}"   # fallback threshold only
 MODEL="${MODEL:-/etc/beamwarden/model.awk}"
@@ -44,7 +47,7 @@ counters() {
 			g=$0; sub(/.*\[/,"",g); sub(/\].*/,"",g); gsub(/,/," ",g)
 			ns=split(g,ch," "); sm=0; for(i=1;i<=ns;i++) sm+=ch[i]
 			if (ns) { rsum+=sm/ns; rn++ } }
-		END { printf "%d %d %d %d %.1f\n", r, p, f, b, (rn?rsum/rn:-60) }'
+		END { printf "%.0f %.0f %.0f %.0f %.1f\n", r, p, f, b, (rn?rsum/rn:-60) }'
 }
 
 # one WIN-second window -> "retry_rate tx_per throughput_mbps rssi"
@@ -54,7 +57,7 @@ sample() {
 	set -- $(counters); local r2=$1 p2=$2 f2=$3 b2=$4 rs2=$5
 	awk -v dr=$((r2-r1)) -v dp=$((p2-p1)) -v df=$((f2-f1)) -v db=$((b2-b1)) -v rs="$rs2" -v w="$WIN" 'BEGIN{
 		tot=dp+dr; if(tot<1)tot=1; sent=dp+df; if(sent<1)sent=1
-		printf "%.5f %.5f %.3f %.1f\n", dr/tot, df/sent, db*8/w/1e6, rs }'
+		printf "%.5f %.5f %.3f %.1f %.0f\n", dr/tot, df/sent, db*8/w/1e6, rs, dp+dr }'
 }
 
 ensure_iface() { iw dev "$AP_IF" info >/dev/null 2>&1 || { log "AP_IF $AP_IF not found (check iw dev)"; return 1; }; }
@@ -81,10 +84,12 @@ cmd_watch() {
 	: ${rm:=0.05} ${rsd:=0.02} ${pm:=0.02} ${psd:=0.02} ${tm:=20} ${tsd:=10} ${rsm:=-60} ${rssd:=5}
 	local use_model=0; [ -f "$MODEL" ] && use_model=1
 	log "watching $AP_IF (engine=$([ $use_model = 1 ] && echo ML-forest || echo threshold), mac=${MAC:-all})"
-	local hits=0 r p t rssi verdict thr
+	local hits=0 r p t rssi act verdict thr
 	while :; do
-		set -- $(sample); r=$1 p=$2 t=$3 rssi=$4
-		if [ $use_model = 1 ]; then
+		set -- $(sample); r=$1 p=$2 t=$3 rssi=$4 act=$5
+		if [ "${act:-0}" -lt "$ACTIVE_MIN_PKTS" ]; then
+			verdict=0; hits=0        # link idle -> nothing to attack; don't evaluate
+		elif [ $use_model = 1 ]; then
 			# 8 relative features in model order, then walk the forest
 			verdict=$(awk -v r=$r -v p=$p -v t=$t -v rssi=$rssi \
 				-v rm=$rm -v rsd=$rsd -v pm=$pm -v psd=$psd -v tm=$tm -v tsd=$tsd -v rsm=$rsm -v rssd=$rssd 'BEGIN{
