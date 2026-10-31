@@ -1784,9 +1784,9 @@
         Pick where this Wi-Fi lives. Each place remembers its own &ldquo;normal&rdquo; so a busy office and a quiet home don&rsquo;t get mixed up.
       </div>
       <div class="learn-places" id="learnPlaces">
-        <button type="button" class="learn-place" data-place="home">&#127968; Home</button>
-        <button type="button" class="learn-place" data-place="event">&#127881; Event</button>
-        <button type="button" class="learn-place" data-place="office">&#127970; Office</button>
+        <button type="button" class="learn-place" data-place="home">Home</button>
+        <button type="button" class="learn-place" data-place="event">Event</button>
+        <button type="button" class="learn-place" data-place="office">Office</button>
       </div>
     </div>
 
@@ -1952,16 +1952,15 @@
   function renderClients(list) {
     if (!$clientsList || !$clientsCount) return;
     $clientsCount.textContent = list.length;
-    /* empty -> hide the whole section (label + list) so it doesn't leave an
-       underflowing block; rig-agnostic (driven by list length, not profile). */
+    /* section ALWAYS visible (user: don't lose the Clients Connected block);
+       empty -> clean placeholder instead of an underflowing void. */
     var $clientsLabel = document.getElementById("clientsLabel");
+    if ($clientsLabel) $clientsLabel.style.display = "";
+    $clientsList.style.display = "";
     if (!list.length) {
-      $clientsList.style.display = "none";
-      if ($clientsLabel) $clientsLabel.style.display = "none";
+      $clientsList.innerHTML = '<div class="clients-empty">no clients connected</div>';
       return;
     }
-    $clientsList.style.display = "";
-    if ($clientsLabel) $clientsLabel.style.display = "";
     $clientsList.innerHTML = list.map(function (c) {
       return '<div class="clients-row"><span class="cmac">' + c.mac +
         '</span><span class="cdev">' + deviceLabel(c.mac) +
