@@ -36,6 +36,7 @@ define Package/beamwarden/install
 	$(INSTALL_BIN) ./files/beamwarden.sh   $(1)/usr/bin/beamwarden
 	$(INSTALL_BIN) ./files/beamwarden.init $(1)/etc/init.d/beamwarden
 	$(INSTALL_BIN) ./files/on_alert        $(1)/etc/beamwarden/on_alert
+	$(INSTALL_DATA) ./files/model.awk      $(1)/etc/beamwarden/model.awk
 	$(INSTALL_CONF) ./files/beamwarden.conf $(1)/etc/beamwarden.conf
 endef
 
