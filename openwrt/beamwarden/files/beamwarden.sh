@@ -32,6 +32,8 @@ WIN="${WIN:-2}"               # seconds per detection window
 CAL_SECONDS="${CAL_SECONDS:-120}"
 RETRY_MULT="${RETRY_MULT:-1.5}"   # alert if retry_rate > baseline * this
 PER_MULT="${PER_MULT:-1.5}"       # alert if tx-PER    > baseline * this
+RETRY_FLOOR="${RETRY_FLOOR:-0.30}"  # safety net: never alert below this abs retry_rate
+PER_FLOOR="${PER_FLOOR:-0.15}"      # (guards a near-zero baseline on a pristine link)
 HITS_TO_ALARM="${HITS_TO_ALARM:-3}"  # consecutive bad windows before alerting (noise guard)
 STATE=/var/run/beamwarden.base
 ALERT_HOOK=/etc/beamwarden/on_alert   # optional: your script, args: retry_rate per_rate
@@ -77,9 +79,11 @@ cmd_calibrate() {
 
 cmd_watch() {
 	local rb pb
-	read rb pb < "$STATE" 2>/dev/null || { rb=0.05; pb=0.02; log "no baseline - run 'beamwarden calibrate'; using weak defaults"; }
-	local rth=$(awk -v b=$rb -v m=$RETRY_MULT 'BEGIN{printf "%.4f", b*m}')
-	local pth=$(awk -v b=$pb -v m=$PER_MULT 'BEGIN{printf "%.4f", b*m}')
+	if [ -f "$STATE" ] && read rb pb < "$STATE"; then :; else
+		rb=0.05; pb=0.02; log "no baseline - run 'beamwarden calibrate'; using weak defaults"
+	fi
+	local rth=$(awk -v b=$rb -v m=$RETRY_MULT -v fl=$RETRY_FLOOR 'BEGIN{t=b*m; if(t<fl)t=fl; printf "%.4f", t}')
+	local pth=$(awk -v b=$pb -v m=$PER_MULT -v fl=$PER_FLOOR 'BEGIN{t=b*m; if(t<fl)t=fl; printf "%.4f", t}')
 	log "watching $AP_IF: retry>$rth or per>$pth (baseline retry=$rb per=$pb), mac=${MAC:-all}"
 	local hits=0
 	while :; do
@@ -100,7 +104,7 @@ cmd_watch() {
 
 cmd_status() {
 	echo "AP_IF=$AP_IF mac=${MAC:-all} win=${WIN}s"
-	if read rb pb < "$STATE" 2>/dev/null; then echo "baseline: retry=$rb per=$pb (x$RETRY_MULT/x$PER_MULT)"
+	if [ -f "$STATE" ] && read rb pb < "$STATE"; then echo "baseline: retry=$rb per=$pb (x$RETRY_MULT/x$PER_MULT)"
 	else echo "baseline: UNCALIBRATED - run 'beamwarden calibrate'"; fi
 	set -- $(sample); echo "now: retry=$1 per=$2"
 }
