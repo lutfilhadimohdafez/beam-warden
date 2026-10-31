@@ -17,6 +17,7 @@ _DEFAULTS = {
     "VICTIM_MAC": "", "VICTIM_IP": "",
     "PHONE_USER": "", "PHONE_PORT": "8022", "PHONE_PASS": "",
     "FWLAB_HOST": "", "FWLAB_USER": "", "FWLAB_PASS": "",
+    "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "",
 }
 
 

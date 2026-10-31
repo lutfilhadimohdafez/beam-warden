@@ -28,3 +28,7 @@ PHONE_PASS=changeme
 FWLAB_HOST=
 FWLAB_USER=
 FWLAB_PASS=
+
+# --- Telegram alerts (dashboard + attack_report --telegram) ---
+TELEGRAM_BOT_TOKEN=     # from @BotFather
+TELEGRAM_CHAT_ID=       # message the bot once, then it is auto-discovered
