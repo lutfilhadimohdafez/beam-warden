@@ -21,7 +21,7 @@ detector — without touching the Wi-Fi protocol itself.
 
 | # | Objective | Target | Status |
 |---|-----------|--------|--------|
-| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **attack replicated** — live forged-BFI injection proven on the AC2100 (386 frames/run, no crash, 4×1 null-steer, forge matches the validated math). Throughput drop: AX3200 prior −48–53%; AC2100 lag-aware re-measure in progress (−36% at 6 dBm, auto-sweeping power down to clear ≥51% — `tools/obj1_auto.py`) |
+| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **DONE — 69.6% downlink drop** — live forged-BFI injection on the AC2100 (919 frames, no crash, 4×1 null-steer, forge matches validated math), baseline 36.2 → attack-settled 11.0 Mbps, retry 0.31→0.51, **RSSI 0 dB drift (confound-controlled)**. Lag-aware measure `tools/obj1_run.py` + auto power-sweep `tools/obj1_auto.py`; `data/obj1_*.csv` |
 | 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — SSH `station dump` capture + real datasets + live dashboard; attack moves retry **5.4×** and throughput **−36%** (≫15% variance) |
 | 3 | ML anomaly detection | ≥55% accuracy | 🟢 **ACHIEVED — 100%** — BFI-storm anomaly detection on **real** data, leakage-safe GroupKFold (every fold 100%). *Within one condition*; cross-condition is honest future work. `tools/bfi_run.py` + `tools/bfi_features.py` |
 
