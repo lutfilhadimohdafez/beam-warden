@@ -126,39 +126,48 @@ TASK_REGISTRY: dict[str, dict] = {
         "description": "Tear down the monitor iface, restore wlan1 to managed WiFi, and restart NetworkManager + wpa_supplicant.",
     },
     "restore_intel": {
-        "label": "Restore Intel WiFi",
+        "label": "Restore Networking",
         "cmd": [
             "sh", "-c",
-            # Bring the Intel (wlan0) back to normal managed WiFi WITHOUT
-            # tearing down mon0. Restart NM + wpa_supplicant (wlan0 reconnects
-            # via autoconnect), then fence the Alfa phy so the shared supplicant
-            # cannot grab mon0 / channel-hop it (the Oct-7 failure). Best-effort:
-            # reports whether mon0 actually survived rather than assuming it did.
-            "PHY=$(for p in /sys/class/ieee80211/phy*; do "
-            "[ \"$(basename $(readlink -f $p/device/driver))\" = mt7921u ] && basename $p; done); "
-            "systemctl start NetworkManager wpa_supplicant 2>/dev/null; "
-            "sleep 3; "
-            # keep NM/supplicant off the Alfa: unmanage every vif on its phy and
-            # delete any managed/p2p-dev vif they spun up there (never {mon}).
-            "if [ -n \"$PHY\" ]; then "
-            "  for v in $(ls /sys/class/ieee80211/$PHY/device/net/ 2>/dev/null); do "
-            "    nmcli device set \"$v\" managed no 2>/dev/null; "
-            "    [ \"$v\" != '{mon}' ] && iw dev \"$v\" del 2>/dev/null; "
-            "  done; "
+            # RECOVERY — NIC-AGNOSTIC. Un-break networking after Alfa ops (or a bad
+            # setup) left NICs unmanaged/down. Does NOT assume a vendor or name
+            # (no hardcoded "Intel"/wlan0): restores EVERY interface except lo, the
+            # monitor iface, and the Alfa's own vifs. Portable to any laptop/PC.
+            # Cross-machine behaviour: NM-based distros fully reconnect; a box with
+            # no NetworkManager degrades gracefully (nmcli calls no-op, `ip link up`
+            # fallback still brings links up, `ip -br link` reports); no Alfa present
+            # -> nothing to fence, every NIC restored.
+            # 1) identify the Alfa (by DRIVER, never name) and its vifs, to skip.
+            "ALFA_PHY=$(for p in /sys/class/ieee80211/phy*; do "
+            "[ \"$(basename $(readlink -f $p/device/driver) 2>/dev/null)\" = mt7921u ] && basename $p; done); "
+            "ALFA_IFS=''; [ -n \"$ALFA_PHY\" ] && ALFA_IFS=$(ls /sys/class/ieee80211/$ALFA_PHY/device/net/ 2>/dev/null); "
+            # 2) restart the managers (no-op if absent) -> brings managed NICs back.
+            "systemctl start NetworkManager wpa_supplicant 2>/dev/null; sleep 3; "
+            # 3) fence the Alfa: unmanage its vifs; delete any non-{mon} vif spun up.
+            "if [ -n \"$ALFA_PHY\" ]; then "
+            "  for v in $ALFA_IFS; do nmcli device set \"$v\" managed no 2>/dev/null; "
+            "    [ \"$v\" != '{mon}' ] && iw dev \"$v\" del 2>/dev/null; done; "
             "fi; "
-            # the Intel is onboard phy0/wlan0 (stable name) — make sure NM owns it
-            "nmcli device set wlan0 managed yes 2>/dev/null; "
-            "nmcli -w 20 device connect wlan0 2>/dev/null; "
-            "sleep 2; "
-            "echo '--- wlan0 (Intel) ---'; "
-            "nmcli -t -f DEVICE,STATE,CONNECTION device status 2>/dev/null | grep '^wlan0' || echo 'wlan0 not reported'; "
+            # 4) restore EVERY other NIC (wifi + wired, any name), skip lo/{mon}/Alfa.
+            "echo '--- restoring NICs ---'; "
+            "for dev in /sys/class/net/*; do n=$(basename \"$dev\"); "
+            "  [ \"$n\" = lo ] && continue; [ \"$n\" = '{mon}' ] && continue; "
+            "  for a in $ALFA_IFS; do [ \"$n\" = \"$a\" ] && continue 2; done; "
+            "  nmcli device set \"$n\" managed yes 2>/dev/null; "
+            "  ip link set \"$n\" up 2>/dev/null; "
+            "  nmcli -w 8 device connect \"$n\" 2>/dev/null; "
+            "  echo \"  $n -> restore attempted\"; "
+            "done; "
+            # 5) report (nmcli, or `ip -br link` fallback where NM is absent).
+            "echo '--- device status ---'; "
+            "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null || ip -br link; "
             "echo '--- mon0 preserved? ---'; "
             "iw dev {mon} info 2>/dev/null | grep -E 'type|channel' || echo 'mon0 GONE — rebuild via Setup Monitor before firing'; "
             "echo '--- internet ---'; "
             "ip route get 1.1.1.1 2>/dev/null | head -1 || echo 'no route'",
         ],
         "privileged": True,
-        "description": "Bring the Intel (wlan0) back to normal WiFi by restarting NetworkManager + wpa_supplicant, while fencing the Alfa phy so mon0 is preserved (reports if it survived).",
+        "description": "Recovery: restore ALL default NICs (wifi + wired, any vendor/name) to managed networking after Alfa ops left them down, while fencing only the Alfa phy so mon0 survives. NIC-agnostic — works on any laptop, not just this box's Intel; degrades gracefully with no NetworkManager.",
     },
     "check_channel": {
         "label": "Check Channel",
