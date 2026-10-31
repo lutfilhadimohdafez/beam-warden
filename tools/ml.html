@@ -437,7 +437,7 @@
   <div class="header">
     <div class="header-left">
       <div class="wordmark">BEAM <span class="sep">//</span> <span class="warden">WARDEN</span></div>
-      <div class="subtitle">BFI-Storm Detection Engine</div>
+      <div class="subtitle">Telemetry Anomaly Detection</div>
     </div>
     <div class="header-right">
       <a href="/" class="nav-link">&larr; Back to Dashboard</a>
@@ -463,38 +463,34 @@
     .bfid-live-readouts .ro-lbl { font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
   </style>
 
-  <!-- LIVE DETECTOR -->
+  <!-- LIVE VIEW POINTER -->
   <div class="section">
-    <div class="section-head">Live detector</div>
-    <div class="section-sub">The current verdict on this network, straight off the detection stream</div>
-    <div class="panel bfid-live standby" id="mlLive">
-      <div class="bfid-live-row">
-        <div>
-          <div class="bfid-live-eyebrow">Live detector</div>
-          <div class="bfid-live-status standby" id="mlStatus">STANDBY</div>
-          <div class="bfid-live-hint" id="mlHint">No BFI feed running &mdash; start monitoring from the Command Center to activate live detection.</div>
-        </div>
-        <div class="bfid-live-readouts">
-          <div class="ro"><div class="ro-val" id="mlRate">&mdash;</div><div class="ro-lbl">BFI / sec</div></div>
-          <div class="ro"><div class="ro-val" id="mlCount">&mdash;</div><div class="ro-lbl">per 2s window</div></div>
-          <div class="ro"><div class="ro-val" id="mlRetry">&mdash;</div><div class="ro-lbl">RETRY=1</div></div>
-        </div>
-      </div>
+    <div class="section-head">Live view</div>
+    <div class="section-sub">The detector reads the router's own telemetry &mdash; watch it live on the dashboard</div>
+    <div class="panel">
+      <p class="body-text">
+        The live signal is the router's own per-client telemetry (retry / PER / throughput / RSSI from
+        <span class="val">iw station dump</span>). Open the
+        <a href="/" class="nav-link" style="font-size:.9rem;text-transform:none;letter-spacing:0;">main dashboard</a>
+        and press <em>Connect</em> to stream it in real time &mdash; under attack, <strong>retry and PER climb</strong>
+        while throughput sags.
+      </p>
     </div>
   </div>
 
   <!-- WHAT IT DETECTS -->
   <div class="section">
     <div class="section-head">What it detects</div>
-    <div class="section-sub">The attack's own on-air signature &mdash; not its effect on the link</div>
+    <div class="section-sub">The attack's effect on the router's own telemetry &mdash; no adapter, no monitor mode</div>
     <div class="panel">
       <p class="body-text">
-        The BeamCraft attack works by <strong>injecting forged beamforming-feedback (BFI) frames</strong>
-        that impersonate the victim. Those injected frames are themselves the giveaway: during an attack the
-        victim's BFI appears on air far more often than the AP could be sounding it, and every forgery carries
-        the <strong>RETRY=1</strong> bit. So Beam-Warden does not look for the attack's <em>effect</em> on
-        throughput (which barely moves on a strong, close link) &mdash; it detects the
-        <strong>forgery storm itself</strong>.
+        The BeamCraft attack forges beamforming-feedback (BFI) frames that mis-steer the AP's beam
+        <em>away</em> from the victim. The victim then can't acknowledge the AP's frames, so
+        <strong>the AP retransmits</strong> &mdash; and its own <strong>tx-retry / PER counters spike</strong>
+        while MCS and throughput sag. Beam-Warden reads those counters straight from
+        <span class="val">iw station dump</span>, so it runs on <strong>any</strong> OpenWrt router with no
+        capture adapter. (Counting the forged frames directly is cleaner but needs monitor-mode hardware
+        many routers lack &mdash; so we detect the retransmit signature instead.)
       </p>
     </div>
   </div>
@@ -502,77 +498,42 @@
   <!-- PIPELINE -->
   <div class="section">
     <div class="section-head">How it works</div>
-    <div class="section-sub">Count the victim's BFI frames per 2-second window, compare to this network's normal</div>
-    <style>
-      .ps-live { margin-top:12px; padding-top:10px; border-top:1px dashed var(--border); }
-      .ps-live-eyebrow { font-size:.6rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; display:flex; align-items:center; gap:6px; }
-      .ps-dot { width:7px; height:7px; border-radius:50%; background:var(--border); flex:none; }
-      .pipe-stage.active .ps-dot { background:var(--ok); box-shadow:0 0 6px var(--ok); }
-      .pipe-stage.alarm  .ps-dot { background:var(--danger); box-shadow:0 0 6px var(--danger); }
-      .ps-live-val { font-size:1.35rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; line-height:1.15; }
-      .ps-live-sub { font-size:.7rem; color:var(--muted); margin-top:2px; }
-      .ps-bar { position:relative; height:9px; border-radius:5px; background:var(--border); overflow:hidden; margin:7px 0 5px; }
-      .ps-bar-fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--ok); transition:width .4s ease, background .3s; border-radius:5px; }
-      .pipe-stage.alarm .ps-bar-fill { background:var(--danger); }
-      .ps-bar-tick { position:absolute; top:-2px; bottom:-2px; left:50%; width:2px; background:var(--text); opacity:.55; }
-      .ps-verdict { font-size:1.5rem; font-weight:800; letter-spacing:.03em; }
-      .ps-verdict.normal { color:var(--ok); }
-      .ps-verdict.attack { color:var(--danger); animation:bfidpulse 1s ease-in-out infinite; }
-      .ps-verdict.standby { color:var(--muted); font-size:1.1rem; }
-    </style>
+    <div class="section-sub">Read the router's telemetry, learn this network's normal, flag the deviation</div>
     <div class="panel pipeline-wrap">
       <div class="pipeline-track">
-        <div class="pipe-stage" id="ps1">
+        <div class="pipe-stage">
           <div class="pipe-stage-num">Stage 1</div>
-          <div class="pipe-stage-title">Sniff</div>
+          <div class="pipe-stage-title">Read</div>
           <div class="pipe-stage-body">
-            Monitor the victim's VHT compressed-beamforming frames on air.<br><br>
-            <span class="formula">category_code == 21<br>sa == victim MAC</span>
-          </div>
-          <div class="ps-live">
-            <div class="ps-live-eyebrow"><span class="ps-dot"></span><span id="ps1State">no feed</span></div>
-            <div class="ps-live-sub">live capture off the air</div>
+            Poll the router's own per-client stats &mdash; no adapter.<br><br>
+            <span class="formula">iw dev &lt;ap&gt; station dump<br>tx retries &middot; tx failed &middot; bitrate &middot; signal</span>
           </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage" id="ps2">
+        <div class="pipe-stage">
           <div class="pipe-stage-num">Stage 2</div>
-          <div class="pipe-stage-title">Count</div>
+          <div class="pipe-stage-title">Calibrate</div>
           <div class="pipe-stage-body">
-            Per 2-second window, tally how many BFI frames arrived and how many carry
-            <span class="val">RETRY=1</span>.
-          </div>
-          <div class="ps-live">
-            <div class="ps-live-eyebrow"><span class="ps-dot"></span>this window</div>
-            <div class="ps-live-val"><span id="ps2Count">&mdash;</span> <span style="font-size:.75rem;color:var(--muted);font-weight:500;">frames</span></div>
-            <div class="ps-live-sub"><span id="ps2Rate">&mdash;</span>/s &middot; RETRY=1: <span id="ps2Retry">&mdash;</span></div>
+            Learn <span class="val">this network's</span> normal retry/PER baseline once
+            (a quiet home is not a busy hall).
           </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage" id="ps3">
+        <div class="pipe-stage">
           <div class="pipe-stage-num">Stage 3</div>
-          <div class="pipe-stage-title">Compare</div>
+          <div class="pipe-stage-title">Relative features</div>
           <div class="pipe-stage-body">
-            Is the rate above <span class="val">this place's learned normal</span>? Forged
-            injection cannot help but push the rate up.
-          </div>
-          <div class="ps-live">
-            <div class="ps-live-eyebrow"><span class="ps-dot"></span>rate vs threshold</div>
-            <div class="ps-bar"><div class="ps-bar-fill" id="ps3Fill"></div><div class="ps-bar-tick" title="attack threshold"></div></div>
-            <div class="ps-live-sub"><span id="ps3Rate">&mdash;</span>/s &nbsp;|&nbsp; tips at <span id="ps3Thr">&mdash;</span>/s</div>
+            Each metric as a <span class="val">ratio / z-score vs baseline</span> &mdash; network-independent,
+            fed to the RandomForest.
           </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage" id="ps4">
+        <div class="pipe-stage">
           <div class="pipe-stage-num">Stage 4</div>
           <div class="pipe-stage-title">Verdict</div>
           <div class="pipe-stage-body">
-            <span class="verdict-ok">NORMAL</span> &mdash; rate at baseline.<br>
-            <span class="verdict-bad">ATTACK</span> &mdash; rate spiked above normal.
-          </div>
-          <div class="ps-live">
-            <div class="ps-live-eyebrow"><span class="ps-dot"></span>right now</div>
-            <div class="ps-verdict standby" id="ps4Verdict">STANDBY</div>
+            <span class="verdict-ok">NORMAL</span> &mdash; telemetry at baseline.<br>
+            <span class="verdict-bad">ATTACK</span> &mdash; sustained retry/PER spike.
           </div>
         </div>
       </div>
@@ -585,24 +546,24 @@
     <div class="section-sub">Real hardware capture &mdash; no synthetic data</div>
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-card-label">Normal window</div>
-        <div class="stat-card-value ok">~16</div>
-        <div class="stat-card-note">BFI frames / 2s (~8/s), RETRY=1 &asymp; 0</div>
+        <div class="stat-card-label">Normal</div>
+        <div class="stat-card-value ok">0.38</div>
+        <div class="stat-card-note">tx-retry rate &middot; PER &asymp; 0.28</div>
       </div>
       <div class="stat-card">
-        <div class="stat-card-label">Attack window</div>
-        <div class="stat-card-value danger">~32</div>
-        <div class="stat-card-note">BFI frames / 2s (~16/s), RETRY=1 spikes</div>
+        <div class="stat-card-label">Under attack</div>
+        <div class="stat-card-value danger">0.48</div>
+        <div class="stat-card-note">tx-retry rate &middot; PER &rarr; 0.36, throughput sags</div>
       </div>
       <div class="stat-card">
-        <div class="stat-card-label">Alarm threshold</div>
-        <div class="stat-card-value">~24</div>
-        <div class="stat-card-note">BFI / 2s (~12/s) &mdash; midpoint, no overlap</div>
+        <div class="stat-card-label">Signal</div>
+        <div class="stat-card-value">retry + PER</div>
+        <div class="stat-card-note">AP retransmits the mis-steered beam</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-label">OBJ3 detection accuracy</div>
-        <div class="stat-card-value ok">100%</div>
-        <div class="stat-card-note">GroupKFold by phase (target &ge; 55%)</div>
+        <div class="stat-card-value ok">82.1%</div>
+        <div class="stat-card-note">leave-one-run-out, 4 real runs (target &ge; 55%)</div>
       </div>
     </div>
   </div>
@@ -610,17 +571,17 @@
   <!-- FEATURES -->
   <div class="section">
     <div class="section-head">The features</div>
-    <div class="section-sub">Four numbers per 2-second window, from the victim's on-air BFI frames</div>
+    <div class="section-sub">From the router's own <span class="val">iw station dump</span> &mdash; each as a ratio/z-score vs this network's baseline</div>
     <div class="panel">
       <table class="data-table">
         <thead>
           <tr><th>Feature</th><th>What it is</th><th>Under attack</th></tr>
         </thead>
         <tbody>
-          <tr><td class="feat-name">bfi_count</td><td class="feat-behavior">victim BFI frames in the window</td><td class="feat-behavior">roughly doubles (genuine + forgeries)</td></tr>
-          <tr><td class="feat-name">bfi_rate</td><td class="feat-behavior">bfi_count / 2s (frames/sec)</td><td class="feat-behavior">spikes</td></tr>
-          <tr><td class="feat-name">retry1_count</td><td class="feat-behavior">how many carry the RETRY=1 bit</td><td class="feat-behavior">spikes (set on every forgery)</td></tr>
-          <tr><td class="feat-name">retry1_ratio</td><td class="feat-behavior">retry1_count / bfi_count</td><td class="feat-behavior">spikes</td></tr>
+          <tr><td class="feat-name">tx_per</td><td class="feat-behavior">tx failed / sent (top feature)</td><td class="feat-behavior">rises</td></tr>
+          <tr><td class="feat-name">retry_rate</td><td class="feat-behavior">tx retries / packets</td><td class="feat-behavior">rises (AP retransmits)</td></tr>
+          <tr><td class="feat-name">throughput</td><td class="feat-behavior">downlink Mbps (byte delta)</td><td class="feat-behavior">sags</td></tr>
+          <tr><td class="feat-name">tx_mcs / rssi</td><td class="feat-behavior">rate index / per-chain signal</td><td class="feat-behavior">MCS drops; RSSI ~flat</td></tr>
         </tbody>
       </table>
     </div>
@@ -632,24 +593,19 @@
     <div class="section-sub">What we report vs. where the signal really is</div>
     <div class="panel">
       <p class="body-text">
-        We report a <strong>RandomForest</strong> (200 trees) scored with <strong>GroupKFold by phase</strong>
-        (each 20-second A/B/A phase is one group, so near-identical adjacent windows never straddle the
-        train/test split &mdash; a leakage-safe estimate). But the honest framing is that the detector is
-        <strong>physics, not a 200-tree model</strong>: a single threshold on the doubled on-air BFI rate
-        already separates every window. Dropping <em>both</em> RETRY features still gives 100% &mdash; an
-        attacker who omits the RETRY=1 marker cannot inject forgeries without raising the rate, so they do
-        not evade detection.
+        We report a <strong>RandomForest</strong> on <strong>self-calibrated relative features</strong>
+        (each metric as a ratio/z-score vs this network's own baseline), scored
+        <strong>leave-one-RUN-out</strong> &mdash; hold out a whole capture run, so the number is "works on a
+        network it never saw", not within-one-run. The forest's decision is <strong>distilled to calibrated
+        thresholds</strong> the on-router package runs (no sklearn on the router).
       </p>
       <p class="body-text" style="margin-top:14px;">
-        <strong>Why RandomForest now, not IsolationForest?</strong> The earlier design ran an
-        <strong>IsolationForest</strong> (unsupervised outlier detector) over an 11-value link-telemetry
-        vector (throughput, RSSI, PER, retry, MCS&hellip;). That signal was weak &mdash; on a strong close link
-        PER stayed flat and RSSI drift confounded everything, so it was dropped. The signal moved to the
-        <strong>BFI storm</strong> (the attack's own on-air frames), which separates cleanly, so the lab
-        <em>proof</em> uses a supervised <strong>RandomForest</strong> reporting accuracy. Note the irony:
-        the <em>deployed</em> engine keeps IsolationForest's better instinct &mdash; learn normal, flag
-        deviation, no attack labels &mdash; because a real defender has no labelled attacks. It is
-        calibrate-and-threshold, run on the signal that actually moves.
+        <strong>Why this, not the earlier designs?</strong> First was an <strong>IsolationForest</strong> on raw
+        11-value telemetry &mdash; too weak at a strong link. Then a <strong>BFI-storm</strong> detector that
+        counted the forged frames on-air &mdash; clean, but needs <strong>monitor-mode capture</strong> (a USB
+        adapter, and a monitor VIF the AP's own radio won't deliver; many routers can't do it) so it isn't
+        portable. This design reads the router's <em>own</em> telemetry &mdash; the attack's retransmit
+        signature &mdash; so it deploys on anyone's OpenWrt router with no extra hardware.
       </p>
     </div>
   </div>
@@ -660,11 +616,11 @@
     <div class="section-sub">The one production concept</div>
     <div class="panel">
       <p class="body-text">
-        Every network has its own normal BFI rate &mdash; a quiet home is not a busy event hall. So instead
-        of a fixed number, Beam-Warden <strong>learns this network's normal first</strong>, then flags any
-        window that spikes above it. You do that on the <strong><a href="/" class="nav-link" style="font-size:0.88rem;text-transform:none;letter-spacing:0;">Learning tab</a></strong>:
-        pick where you are, press <em>Learn my normal Wi-Fi</em> once with the attack off, and the live check
-        then shows NORMAL or ATTACK for that place.
+        Every network has its own normal retry/PER &mdash; a quiet home is not a busy event hall. So instead
+        of a fixed number, Beam-Warden <strong>learns this network's normal first</strong>, then flags a
+        sustained spike above it. On a deployed router that is one command &mdash;
+        <span class="val">beamwarden calibrate</span> (run it once with the attack off) &mdash; after which
+        <span class="val">beamwarden watch</span> raises NORMAL/ATTACK for that network. No lab numbers baked in.
       </p>
     </div>
   </div>
@@ -675,16 +631,15 @@
     <div class="section-sub">What is proven, and what is still future work</div>
     <div class="panel">
       <p class="body-text">
-        <strong>100%</strong> detection (GroupKFold by phase, every fold 100%) on a real-hardware capture, well
-        past the <strong>&ge; 55%</strong> OBJ3 target. Scope, stated up front: this is <strong>within one
-        condition</strong> &mdash; one ~6-minute capture, two 20-second attack bursts, one distance / channel /
-        traffic load. <strong>Cross-condition generalisation is untested</strong> and is the honest next step
-        (&ge; 3 captures across different days / distances / channels / loads, reported as held-out-capture
-        accuracy). The engine is now packaged as a standalone OpenWrt service
-        (<span class="val">openwrt/beamwarden</span> &mdash; busybox + tcpdump, no python/sklearn): it
-        self-calibrates a per-network baseline and alerts on a surge. The one thing to confirm on first
-        flash is whether the AP chipset surfaces its own received sounding frames in a monitor vif; the
-        proven path today runs the detector on the laptop's monitor NIC beside the AP.
+        <strong>82.1%</strong> leave-one-RUN-out across <strong>4 real runs / 126 samples</strong> &mdash; past
+        the <strong>&ge; 55%</strong> OBJ3 target on data from a run it never trained on. Per-held-out-run:
+        <span class="val">[100, 48, 80, 100]</span>. The low fold is the one noisy low-power run &mdash; the
+        honest <strong>covert-attack weakness</strong>: when the attack doesn't degrade the link, telemetry
+        barely moves. More conditions (distance / channel / load / hardware) would shrink that fold.
+        The engine ships as a standalone OpenWrt package
+        (<span class="val">openwrt/beamwarden</span> &mdash; busybox + <span class="val">iw</span>, no python/
+        sklearn, no adapter): <span class="val">calibrate</span> learns the baseline, <span class="val">watch</span>
+        alerts. Validated running on the real AC2100.
       </p>
     </div>
   </div>
@@ -692,15 +647,15 @@
   <!-- FILES -->
   <div class="section">
     <div class="section-head">Pipeline</div>
-    <div class="section-sub">Capture &rarr; window + train &rarr; live display</div>
+    <div class="section-sub">Collect telemetry &rarr; train + validate &rarr; deploy on-router</div>
     <div class="panel">
       <table class="data-table">
         <thead><tr><th>File</th><th>Role</th></tr></thead>
         <tbody>
-          <tr><td class="feat-name">tools/bfi_run.py</td><td class="feat-behavior">capture harness: monitor + A/B/A (normal&rarr;attack&rarr;normal), tcpdump &rarr; pcap + phase timings</td></tr>
-          <tr><td class="feat-name">tools/bfi_features.py</td><td class="feat-behavior">slice the pcap into labelled 2s windows, train, print GroupKFold accuracy</td></tr>
-          <tr><td class="feat-name">tools/dashboard.py</td><td class="feat-behavior">_bfi_verdict + --bfi-feed / --replay: live / replay detection stream</td></tr>
-          <tr><td class="feat-name">tools/dashboard.html</td><td class="feat-behavior">BFI-Storm panel + Learning tab: NORMAL &harr; ATTACK display</td></tr>
+          <tr><td class="feat-name">tools/obj1_run.py</td><td class="feat-behavior">A/B/A attack run; logs labelled <span class="val">iw station dump</span> telemetry (retry/PER/MCS/throughput)</td></tr>
+          <tr><td class="feat-name">tools/train_telemetry.py</td><td class="feat-behavior">self-calibrated relative features &rarr; RandomForest &rarr; leave-one-run-out accuracy</td></tr>
+          <tr><td class="feat-name">openwrt/beamwarden/</td><td class="feat-behavior">standalone OpenWrt package: calibrate + watch on-router, adapter-free</td></tr>
+          <tr><td class="feat-name">tools/dashboard.html</td><td class="feat-behavior">live telemetry tiles (retry/PER/throughput/RSSI) = the live detection view</td></tr>
         </tbody>
       </table>
     </div>
@@ -708,93 +663,5 @@
 
 </div>
 
-<script>
-/* Live detector: subscribe to the same /ws bfi_detect stream the dashboard uses.
-   Shows STANDBY until a feed is running, then NORMAL / ATTACK with live numbers. */
-(function () {
-  var panel = document.getElementById("mlLive"),
-      statusEl = document.getElementById("mlStatus"),
-      hintEl = document.getElementById("mlHint"),
-      rateEl = document.getElementById("mlRate"),
-      cntEl = document.getElementById("mlCount"),
-      retryEl = document.getElementById("mlRetry"),
-      last = 0;
-
-  function set(cls, txt, hint) {
-    panel.className = "panel bfid-live " + cls;
-    statusEl.className = "bfid-live-status " + cls;
-    statusEl.textContent = txt;
-    if (hint !== undefined) hintEl.innerHTML = hint;
-  }
-  function dashes() { rateEl.textContent = cntEl.textContent = retryEl.textContent = "—"; }
-
-  /* ---- Stage 1->4 pipeline, driven live ---- */
-  var stages = ["ps1", "ps2", "ps3", "ps4"].map(function (id) { return document.getElementById(id); }),
-      ps1State = document.getElementById("ps1State"),
-      ps2Count = document.getElementById("ps2Count"),
-      ps2Rate = document.getElementById("ps2Rate"),
-      ps2Retry = document.getElementById("ps2Retry"),
-      ps3Fill = document.getElementById("ps3Fill"),
-      ps3Rate = document.getElementById("ps3Rate"),
-      ps3Thr = document.getElementById("ps3Thr"),
-      ps4Verdict = document.getElementById("ps4Verdict");
-
-  function pipeLive(d) {
-    var attack = d.verdict === "attack";
-    stages.forEach(function (s) { s.className = "pipe-stage active" + (attack ? " alarm" : ""); });
-    ps1State.textContent = "listening";
-    ps2Count.textContent = (d.bfi_count != null ? d.bfi_count : Math.round(d.bfi_rate * 2));
-    ps2Rate.textContent = d.bfi_rate;
-    ps2Retry.textContent = d.retry1_count;
-    ps3Fill.style.width = Math.round((d.score != null ? d.score : 0) * 100) + "%";
-    ps3Rate.textContent = d.bfi_rate;
-    ps3Thr.textContent = (d.threshold != null ? d.threshold : "—");
-    ps4Verdict.className = "ps-verdict " + (attack ? "attack" : "normal");
-    ps4Verdict.textContent = attack ? "ATTACK" : "NORMAL";
-  }
-  function pipeStandby() {
-    stages.forEach(function (s) { s.className = "pipe-stage"; });
-    ps1State.textContent = "no feed";
-    ps2Count.textContent = ps2Rate.textContent = ps2Retry.textContent = "—";
-    ps3Fill.style.width = "0%";
-    ps3Rate.textContent = "—";
-    ps4Verdict.className = "ps-verdict standby";
-    ps4Verdict.textContent = "STANDBY";
-  }
-
-  function connect() {
-    var proto = location.protocol === "https:" ? "wss:" : "ws:";
-    var ws = new WebSocket(proto + "//" + location.host + "/ws");
-    ws.onmessage = function (e) {
-      var d; try { d = JSON.parse(e.data); } catch (_) { return; }
-      if (d.type !== "bfi_detect") return;
-      last = Date.now();
-      var attack = d.verdict === "attack";
-      rateEl.textContent = (d.bfi_rate != null ? d.bfi_rate : "—");
-      cntEl.textContent = (d.bfi_rate != null ? Math.round(d.bfi_rate * 2) : "—");
-      retryEl.textContent = (d.retry1_count != null ? d.retry1_count : "—");
-      set(attack ? "attack" : "normal",
-          attack ? "ATTACK" : "NORMAL",
-          attack ? "Forgery storm &mdash; on-air BFI rate spiked above this network's normal."
-                 : "On-air BFI rate is at this network's learned baseline.");
-      pipeLive(d);
-    };
-    ws.onclose = function () { setTimeout(connect, 2000); };
-    ws.onerror = function () { try { ws.close(); } catch (_) {} };
-  }
-
-  /* watchdog: no verdict for 4s => no feed is running */
-  setInterval(function () {
-    if (Date.now() - last > 4000) {
-      set("standby", "STANDBY",
-          "No BFI feed running &mdash; start monitoring from the Command Center to activate live detection.");
-      dashes();
-      pipeStandby();
-    }
-  }, 1000);
-
-  connect();
-})();
-</script>
 </body>
 </html>

@@ -1,92 +1,86 @@
-# Beam Warden — ML Detection Engine (Objective 3)
+# Beam-Warden — ML Detection Engine (Objective 3)
 
-**How we detect the BeamCraft beamforming-feedback forgery attack — from the
-attack's own on-air signature.** For the team: what the engine does, which
-features it uses, and an honest read of how strong the result is.
+**How we detect the BeamCraft beamforming-feedback forgery attack from the
+router's OWN telemetry — adapter-free, so it deploys on anyone's OpenWrt router.**
 
-> Supersedes the earlier Isolation-Forest / 11-telemetry design. That approach
-> (unsupervised anomaly detection on router throughput/PHY counters) was built
-> but did not pan out: at a strong, close, single-stream link the attack barely
-> moves throughput/RSSI, so there was no reliable telemetry signal to learn. The
-> working detector reads the **attack's forged-BFI frames directly off-air.**
+> Supersedes TWO earlier designs:
+> 1. **IsolationForest / 11-telemetry** — unsupervised on raw router counters; the
+>    raw throughput/RSSI signal was too weak at a strong link.
+> 2. **BFI-storm (monitor capture)** — counted the forged BFI frames on-air. Clean
+>    (100%) but needs **monitor-mode capture**: a USB adapter in the lab, and a
+>    monitor VIF that the AP's own radio won't deliver (verified on the mt7615 — the
+>    VIF creates but captures nothing) and that many routers can't do at all. **Not
+>    portable**, so it's retired as the deployable detector (kept only as a research
+>    result / exhibition demo where the Alfa is present).
+>
+> The shipped engine reads `iw station dump` — telemetry every OpenWrt router has.
 
 ---
 
 ## 1. The idea in one line
 
-The BeamCraft attack works by **injecting forged beamforming-feedback (BFI)
-frames** that impersonate the victim. Those injected frames are *themselves* the
-anomaly: during an attack the victim's BFI appears on-air far more often than the
-AP could possibly be sounding it, and the forgeries carry the **RETRY=1** bit.
-So we don't try to see the attack's *effect* on the link — we detect the
-**forgery storm** itself.
+A forged-BFI attack misdirects the AP's beam, so the victim can't ACK → **the AP
+retransmits** → its own **tx-retry / PER** counters climb and MCS/throughput sag.
+We detect that retransmit signature from the router's own station telemetry.
 
 ```
-   monitor victim's BFI frames ─► count per 2s window ─► rate doubled? ─► 🚨 ATTACK
+   iw station dump ─► self-calibrate baseline ─► relative features ─► RandomForest ─► verdict
+   (no adapter)        (per network)              (ratio/z vs normal)
 ```
 
-This matches the project title ("Beamforming **Anomaly** Detection") and the
-BeamCraft journal §6, which names retry/PER on the BFI frames as the strongest
-detection feature — far more robust than throughput, which is link-dependent.
+The attack is **covert by design** (barely dents throughput on a strong link), so
+we do NOT rely on a bandwidth alarm — the **retry/PER rise is the physics** (a
+misdirected beam *must* cause retransmits), present even when throughput looks fine.
 
 ---
 
-## 2. The features ⭐
+## 2. The features ⭐ — self-calibrated (this is what makes it portable)
 
-Per **2-second window**, computed from the victim's VHT compressed-beamforming
-frames on-air (`wlan.fixed.category_code == 21`, `wlan.sa == <victim MAC>`):
+Per time window, from `iw dev <ap> station dump` (per client):
 
-| Feature | What it is | Under attack |
-|---|---|---|
-| `bfi_count` | victim BFI frames in the window | **~doubles** (genuine + injected forgeries) |
-| `bfi_rate` | `bfi_count / 2s` (frames/sec) | **spikes** |
-| `retry1_count` | how many carry the RETRY=1 bit | **spikes** (BeamCraft sets RETRY=1 on every forgery) |
-| `retry1_ratio` | `retry1_count / bfi_count` | **spikes** |
+| Raw metric | Under attack |
+|---|---|
+| `retry_rate` (tx retries / packets) | **rises** |
+| `tx_per` (tx failed / sent) | **rises** |
+| `tx_mcs`, `throughput` | sag |
+| `rssi` (per-chain) | ~flat (direction, not power) |
 
-Measured separation on the real capture (40 normal / 20 attack windows):
+**Every network's normal is different** (a quiet home ≠ a busy hall), so a model on
+*absolute* values won't transfer. Instead each metric becomes a **relative** feature
+vs that network's own calibrated baseline:
 
 ```
-   normal window : ~8  BFI/s,  retry1 ≈ 0
-   attack window : ~16 BFI/s,  retry1 ≈ 17
+   retry_ratio = current / baseline_mean      retry_z = (current - mean) / std
 ```
 
-The classes are **widely, cleanly separable** — there is no overlap on
-`bfi_count`.
+A 60 % retry jump reads the same whether the baseline is 0.1 or 0.6 → the model
+learns the *shape* of an attack, not one rig's numbers.
 
 ---
 
-## 3. The model (and an honest note about it)
+## 3. The model
 
-We report a **RandomForest** (200 trees) evaluated with **GroupKFold by phase**
-(each 20 s A/B/A phase is one group, so adjacent near-identical 2 s windows never
-straddle the train/test split — a leakage-safe estimate).
+**RandomForest** (self-calibrated relative features), evaluated **leave-one-RUN-out**
+(hold out a whole capture run → the "works on a network it never saw" number).
 
-**Honest framing for the viva:** the real detector is **physics, not a 200-tree
-model** — a single threshold `bfi_count ≥ 24` already separates every window.
-The right thing to claim is: *injecting forged BFI unavoidably raises the on-air
-BFI rate, and that rate anomaly is what we detect.* The RandomForest is just the
-reported estimator; the signal is in the data.
+- **OBJ3 target: ≥55 %.**
+- **Achieved: 82.1 %** leave-one-run-out across 4 real runs / 126 samples.
+- Per-held-out-run: **[100, 48, 80, 100]**. Top features: **tx_PER, throughput, retry**.
 
-**Robustness:** dropping *both* RETRY features (keeping only `bfi_count` +
-`bfi_rate`) still gives 100%. So an attacker who omits the RETRY=1 marker does
-**not** evade detection — they cannot inject forgeries without raising the rate.
+Train offline (`tools/train_telemetry.py`); the forest's decision is **distilled to
+calibrated thresholds** the on-router package runs (no sklearn on the router).
 
 ---
 
 ## 4. Results & honest status
 
-- **OBJ3 target: ≥55% detection accuracy.**
-- **Achieved: 100%** (GroupKFold by phase, leakage-safe; every fold 100%), on
-  **real hardware** capture — no synthetic data.
-- ⚠️ **Scope limit, stated up front:** this is **within one condition** — one
-  ~6-minute capture, two 20 s attack bursts (≈2 truly independent attack events),
-  one distance/channel/traffic load. **Cross-condition generalisation is
-  untested** and is the honest next step: ≥3 captures across different days /
-  distances / channels / loads, reported as held-out-capture accuracy.
-- Packaging the engine into OpenWrt firmware as a standalone on-box service is
-  **future work** — detection needs a monitor-mode capture, and the AC2100's
-  mt7615 does not expose a monitor VIF alongside its AP, so today the engine runs
-  on the laptop's Alfa monitor beside the AP.
+- ✅ Meets OBJ3 (82.1 % ≥ 55 %) on *unseen-run* data, adapter-free.
+- ⚠️ **The 48 % fold** is the one noisy low-power run — the **covert-attack
+  weakness**: when the attack doesn't degrade the link, telemetry barely moves.
+  Documented, not hidden. Catching the forged frames directly would fix it but needs
+  monitor mode (not portable) — the deliberate tradeoff for universal deployability.
+- ⚠️ 4 runs on one rig; more conditions (distance/channel/load/hardware) would
+  shrink that fold — the outstanding rigor work.
 
 ---
 
@@ -94,10 +88,12 @@ reported estimator; the signal is in the data.
 
 | File | Role |
 |---|---|
-| `tools/bfi_run.py` | capture harness — monitor mon0, A/B/A (normal→attack→normal), tcpdump → `data/bfi_<ts>.pcap` + `.phases.json` |
-| `tools/bfi_features.py` | offline — slices the pcap into labelled 2 s windows, trains, prints GroupKFold accuracy → `data/bfi_<ts>.windows.csv` |
-| `tools/dashboard.py` (`_bfi_verdict`, `--bfi-feed` / `--replay`) | live/replay detection stream to the dashboard |
-| `tools/dashboard.html` (BFI-Storm panel) | exhibition NORMAL↔ATTACK display |
+| `tools/mt76_capture.py` / `tools/obj1_run.py` | collect labelled `iw station dump` telemetry (normal/attack) |
+| `tools/train_telemetry.py` | self-calibrated features → RandomForest → leave-one-run-out accuracy |
+| `openwrt/beamwarden/` | the standalone OpenWrt package: `calibrate` + `watch` on-router, adapter-free |
+| `tools/dashboard.py` + `dashboard.html` | live telemetry tiles (retry/PER/throughput/RSSI) = the live detection view |
 
 **Reproduce the number:**
-`.venv/bin/python tools/bfi_features.py --pcap data/bfi_<ts>.pcap --phases data/bfi_<ts>.phases.json`
+`.venv/bin/python tools/train_telemetry.py data/obj1_*.csv data/real_aba_*.csv`
+
+**Deploy on any router:** `opkg install beamwarden_*.ipk` → `beamwarden calibrate` → `beamwarden watch`.
