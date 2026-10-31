@@ -311,23 +311,14 @@ TASK_REGISTRY: dict[str, dict] = {
                        "Needs iperf3 -s on the phone (Victim IP) + mon0 hearing.",
     },
     "train_detector": {
-        "label": "Train Detector",
+        "label": "Validate Detector (OBJ3)",
         "cmd": [
-            "python", str(_TOOLS / "train_detector.py"),
-            "--csv", "{csv}",
+            "python", str(_TOOLS / "train_telemetry.py"), "{csv}",
         ],
         "privileged": False,
-        "description": "Train IsolationForest anomaly detector on normal telemetry CSV.",
-    },
-    "gen_synthetic": {
-        "label": "Generate Synthetic Attack",
-        "cmd": [
-            "python", str(_TOOLS / "make_synthetic_attack.py"),
-            "--normal", str(_ROOT / "data" / "normal_iperf.csv"),
-            "--out", str(_ROOT / "data" / "synthetic_attack.csv"),
-        ],
-        "privileged": False,
-        "description": "Generate synthetic attack telemetry for training.",
+        "description": "Train + leave-one-run-out validate the RandomForest anomaly "
+                       "detector on self-calibrated router-telemetry features (retry/PER/"
+                       "RSSI/throughput). Pass one or more labelled telemetry CSVs.",
     },
     "decode_features": {
         "label": "Decode BFI Features",

@@ -1,0 +1,30 @@
+# Beam-Warden rig config  —  COPY THIS TO  rig.conf  AND SET YOUR OWN VALUES.
+#   cp rig.conf.example rig.conf   &&   edit rig.conf
+# rig.conf is gitignored: your credentials never get committed. Nothing rig-specific
+# is hardcoded in source — the tools + dashboard read these values (or BW_<KEY> env).
+#
+# A person deploying the detector on their OWN network only needs the OpenWrt
+# package (openwrt/beamwarden) + `beamwarden calibrate`; this file is for the
+# research/attack rig (dashboard + capture + attack tools).
+
+# --- Router (the OpenWrt AP being monitored / attacked in the lab) ---
+ROUTER_HOST=192.168.1.1
+ROUTER_USER=root
+ROUTER_PASS=changeme            # your router's root password
+ROUTER_AP_IFACE=phy1-ap0        # 5GHz AP interface (see `iw dev`)
+ROUTER_AP_BSSID=aa:bb:cc:dd:ee:ff
+ROUTER_CHANNEL=36
+
+# --- Victim client (the protected / test station) ---
+VICTIM_MAC=aa:bb:cc:dd:ee:ff
+VICTIM_IP=192.168.1.105
+
+# --- Phone running Termux iperf3 for traffic generation (lab only) ---
+PHONE_USER=u0_xxxx
+PHONE_PORT=8022
+PHONE_PASS=changeme
+
+# --- Compute offload box (optional, lab only) ---
+FWLAB_HOST=
+FWLAB_USER=
+FWLAB_PASS=

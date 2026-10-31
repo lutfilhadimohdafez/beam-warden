@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rig import RIG  # creds/IDs from rig.conf (gitignored), not hardcoded
 from aba_mt76 import FIELDS, measure_phase, monitor_up, say, sh, teardown
 from aba_measure import (abort, check_mon_hearing, count_injections,
                          ensure_attack_dead, spawn_attack)
@@ -125,18 +126,18 @@ def demo():
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", default="192.168.1.1")
-    p.add_argument("--user", default="root")
-    p.add_argument("--password", default="admin")
-    p.add_argument("--ap-iface", default="phy1-ap0")
-    p.add_argument("--ap", default="5c:02:14:0e:e1:c5")
-    p.add_argument("--victim", default="16:0f:02:1d:91:42")
-    p.add_argument("--victim-ip", default="192.168.1.105")
-    p.add_argument("--phone-user", default="u0_a349")
-    p.add_argument("--phone-port", default="8022")
-    p.add_argument("--phone-pass", default="prime1208")
+    p.add_argument("--host", default=RIG["ROUTER_HOST"])
+    p.add_argument("--user", default=RIG["ROUTER_USER"])
+    p.add_argument("--password", default=RIG["ROUTER_PASS"])
+    p.add_argument("--ap-iface", default=RIG["ROUTER_AP_IFACE"])
+    p.add_argument("--ap", default=RIG["ROUTER_AP_BSSID"])
+    p.add_argument("--victim", default=RIG["VICTIM_MAC"])
+    p.add_argument("--victim-ip", default=RIG["VICTIM_IP"])
+    p.add_argument("--phone-user", default=RIG["PHONE_USER"])
+    p.add_argument("--phone-port", default=RIG["PHONE_PORT"])
+    p.add_argument("--phone-pass", default=RIG["PHONE_PASS"])
     p.add_argument("--mon", default="mon0")
-    p.add_argument("--channel", default="36")
+    p.add_argument("--channel", default=RIG["ROUTER_CHANNEL"])
     p.add_argument("--port", type=int, default=5201)
     p.add_argument("--baseline", type=float, default=30, metavar="sec",
                    help="clean baseline length")

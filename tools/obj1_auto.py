@@ -26,10 +26,13 @@ import time
 from pathlib import Path
 
 FYP = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(FYP / "tools"))
+from rig import RIG  # creds/IDs from rig.conf (gitignored), not hardcoded
 PY = FYP / ".venv" / "bin" / "python"
 OBJ1 = FYP / "tools" / "obj1_run.py"
 LOG = Path("/tmp/beam-warden/obj1_auto_last.log")
-ROUTER = "sshpass -p admin ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 root@192.168.1.1"
+ROUTER = (f"sshpass -p {RIG['ROUTER_PASS']} ssh -o StrictHostKeyChecking=no "
+          f"-o ConnectTimeout=8 {RIG['ROUTER_USER']}@{RIG['ROUTER_HOST']}")
 
 
 def say(m):

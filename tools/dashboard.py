@@ -28,6 +28,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from rig import RIG  # rig-specific creds/IDs from rig.conf (gitignored), not hardcoded
 from gn630v_telemetry import compute_deltas, parse_iwpriv_stat, read_iface_bytes
 from gn630v_telnet import GN630V
 from mt76_telemetry import SSHConn, parse_iw_station_dump
@@ -2095,12 +2096,12 @@ if __name__ == "__main__":
     )
     # Xiaomi AX3200 (RB01) — genuine 4x4 box, stock XiaoQiang firmware.
     # Telnet creds: password from unlock-ax3200.py <S/N>. iface wl0 = the
-    # MT7915 4x4 5GHz radio (Rssi line shows 4 RX chains); wl1/wl13/wl14 are
-    # the mt7622 2.4GHz. (The old GN630v was 192.168.0.1/tmadmin/rai1.)
-    p.add_argument("--host", default="192.168.31.1")
-    p.add_argument("--user", default="root")
-    p.add_argument("--password", default="REDACTED")
-    p.add_argument("--iface", default="wl0")
+    # Router defaults come from rig.conf (gitignored) via rig.py — NOT hardcoded,
+    # so another user points it at their own router without editing source.
+    p.add_argument("--host", default=RIG["ROUTER_HOST"])
+    p.add_argument("--user", default=RIG["ROUTER_USER"])
+    p.add_argument("--password", default=RIG["ROUTER_PASS"])
+    p.add_argument("--iface", default=RIG["ROUTER_AP_IFACE"])
     p.add_argument("--interval", type=float, default=2.0)
     p.add_argument("--mode", choices=["live", "replay"], default=None)
     p.add_argument("--csv", default="data/normal_iperf.csv")

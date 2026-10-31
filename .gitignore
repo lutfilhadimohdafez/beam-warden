@@ -22,3 +22,7 @@ docs/_flynn_*.md
 
 # local router creds (never commit — plaintext passwords)
 tools/routers.local.json
+
+# rig-specific credentials/env — never commit
+rig.conf
+.rig.conf
