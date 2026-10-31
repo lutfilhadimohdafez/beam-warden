@@ -15,6 +15,8 @@ import socket
 import statistics
 import subprocess
 import sys
+sys.path.insert(0, __import__("os").path.dirname(__file__) or ".")
+from rig import RIG  # rig.conf creds, not hardcoded
 import threading
 import time
 from datetime import datetime, timezone
@@ -336,10 +338,10 @@ def print_table(rows):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Confound-aware A/B/A attack measurement")
-    p.add_argument("--host", default="192.168.31.1")
-    p.add_argument("--user", default="root")
-    p.add_argument("--password", default="REDACTED")
-    p.add_argument("--iface", default="wl0")
+    p.add_argument("--host", default=RIG["ROUTER_HOST"])
+    p.add_argument("--user", default=RIG["ROUTER_USER"])
+    p.add_argument("--password", default=RIG["ROUTER_PASS"])
+    p.add_argument("--iface", default=RIG["ROUTER_AP_IFACE"])
     p.add_argument("--ap", default="5c:02:14:b0:34:13")
     p.add_argument("--victim", default="fe:40:39:4d:6d:da")
     p.add_argument("--mon", default="mon0")

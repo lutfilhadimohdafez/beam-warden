@@ -21,15 +21,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rig import RIG  # rig.conf creds, not hardcoded
 from aba_mt76 import monitor_up, teardown, sh, say
 from aba_measure import (check_mon_hearing, count_injections, ensure_attack_dead,
                          spawn_attack)
 
 FYP = Path(__file__).resolve().parent.parent
-MON, CH = "mon0", "36"
-AP, VICTIM, VICTIM_IP = "5c:02:14:0e:e1:c5", "16:0f:02:1d:91:42", "192.168.1.105"
-PH = ("sshpass -p prime1208 ssh -p 8022 -o StrictHostKeyChecking=no "
-      "-o ConnectTimeout=8 u0_a349@192.168.1.105")
+MON, CH = "mon0", RIG["ROUTER_CHANNEL"]
+AP, VICTIM, VICTIM_IP = RIG["ROUTER_AP_BSSID"], RIG["VICTIM_MAC"], RIG["VICTIM_IP"]
+PH = (f"sshpass -p {RIG['PHONE_PASS']} ssh -p {RIG['PHONE_PORT']} -o StrictHostKeyChecking=no "
+      f"-o ConnectTimeout=8 {RIG['PHONE_USER']}@{RIG['VICTIM_IP']}")
 
 
 def load_loop(stop):

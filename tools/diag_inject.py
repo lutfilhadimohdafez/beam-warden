@@ -22,16 +22,17 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rig import RIG  # rig.conf creds, not hardcoded
 from aba_measure import abort
 
 FYP = Path("/home/lutfil/fyp")
-MON, CH = "mon0", "36"
-AP, VICTIM = "5c:02:14:0e:e1:c5", "16:0f:02:1d:91:42"
+MON, CH = "mon0", RIG["ROUTER_CHANNEL"]
+AP, VICTIM = RIG["ROUTER_AP_BSSID"], RIG["VICTIM_MAC"]
 BIN = str(FYP / "BeamCraft_AE" / "main_su")
 SCR = Path("/tmp/beam-warden")
-PHONE = ("sshpass -p prime1208 ssh -p 8022 -o StrictHostKeyChecking=no "
-         "-o ConnectTimeout=8 u0_a349@192.168.1.105")
-VICTIM_IP = "192.168.1.105"
+PHONE = (f"sshpass -p {RIG['PHONE_PASS']} ssh -p {RIG['PHONE_PORT']} -o StrictHostKeyChecking=no "
+         f"-o ConnectTimeout=8 {RIG['PHONE_USER']}@{RIG['VICTIM_IP']}")
+VICTIM_IP = RIG["VICTIM_IP"]
 
 
 def sh(c): return subprocess.run(c, shell=True, text=True, capture_output=True)

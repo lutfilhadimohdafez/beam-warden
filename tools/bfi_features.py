@@ -11,6 +11,9 @@ from normal. Reports RandomForest 5-fold CV accuracy = the OBJ3 detection number
 
 No root. Run: .venv/bin/python tools/bfi_features.py --pcap data/bfi_*.pcap --phases data/bfi_*.phases.json
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(__file__) or ".")
+from rig import RIG  # rig.conf creds, not hardcoded
 import argparse
 import csv
 import json
@@ -74,7 +77,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--pcap", required=True)
     p.add_argument("--phases", required=True)
-    p.add_argument("--victim", default="16:0f:02:1d:91:42")
+    p.add_argument("--victim", default=RIG["VICTIM_MAC"])
     p.add_argument("--win", type=float, default=2.0)
     p.add_argument("--out", default=None)
     a = p.parse_args()

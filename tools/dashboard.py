@@ -515,7 +515,7 @@ async def _producer_pcap(pcap_path: str) -> None:
 # rate roughly DOUBLES and RETRY=1 spikes. A plain threshold on frames/sec over
 # a sliding window already gives the OBJ3 100% number (bfi_features.py), so that
 # is all this does — no model to load at startup.
-BFI_VICTIM = "16:0f:02:1d:91:42"          # the EBF 5GHz client (see MEMORY)
+BFI_VICTIM = RIG["VICTIM_MAC"]            # victim station (from rig.conf, not hardcoded)
 BFI_WINDOW_S = 2.0                          # match bfi_features default window
 _BFI_WINDOWS_CSV = (Path(__file__).resolve().parent.parent
                     / "data" / "bfi_20261031_023539.windows.csv")

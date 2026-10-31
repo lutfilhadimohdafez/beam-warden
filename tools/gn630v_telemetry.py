@@ -8,6 +8,8 @@ import argparse
 import csv
 import re
 import sys
+sys.path.insert(0, __import__("os").path.dirname(__file__) or ".")
+from rig import RIG  # rig.conf creds, not hardcoded
 import time
 from pathlib import Path
 
@@ -233,10 +235,10 @@ def main() -> None:
     # Defaults target the Xiaomi AX3200 (RB01) 4x4 — the live rig. wl0 = its
     # MT7915 5GHz radio. (Old GN630v ONT was 192.168.0.1/tmadmin/REDACTED/rai1;
     # pass those via flags to poll the GN630v instead.)
-    p.add_argument("--host", default="192.168.31.1", help="router host/IP")
-    p.add_argument("--user", default="root", help="telnet user")
-    p.add_argument("--password", default="REDACTED", help="telnet password")
-    p.add_argument("--iface", default="wl0", help="wireless interface (AX3200 5GHz)")
+    p.add_argument("--host", default=RIG["ROUTER_HOST"], help="router host/IP")
+    p.add_argument("--user", default=RIG["ROUTER_USER"], help="telnet user")
+    p.add_argument("--password", default=RIG["ROUTER_PASS"], help="telnet password")
+    p.add_argument("--iface", default=RIG["ROUTER_AP_IFACE"], help="wireless interface")
     p.add_argument("--label", required=True, choices=["normal", "attack"],
                     help="Tags every row")
     p.add_argument("--interval", type=float, default=2.0,

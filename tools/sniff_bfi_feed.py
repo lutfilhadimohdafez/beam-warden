@@ -29,10 +29,11 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rig import RIG  # rig.conf creds, not hardcoded
 from aba_mt76 import monitor_up, teardown, sh, say
 from aba_measure import check_mon_hearing
 
-MON, CH, VICTIM = "mon0", "36", "16:0f:02:1d:91:42"
+MON, CH, VICTIM = "mon0", "36", RIG["VICTIM_MAC"]
 WEDGE_RE = re.compile(r"mt7921|xhci_hcd.*(?i:reset)|-110|vendor request", re.I)
 
 

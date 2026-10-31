@@ -5,10 +5,11 @@ This answers 'does it work on normal conditions' with a real number."""
 import sys, statistics as st
 from pathlib import Path
 sys.path.insert(0, "/home/lutfil/fyp/tools")
+from rig import RIG  # rig.conf creds, not hardcoded
 from bfi_features import extract
 
 PCAP = sys.argv[1] if len(sys.argv) > 1 else "/home/lutfil/fyp/data/realuse_20261031_071927.pcap"
-VICTIM = "16:0f:02:1d:91:42"
+VICTIM = RIG["VICTIM_MAC"]
 WIN = 2.0
 # thresholds distilled from the attack capture (normal max ~20 / ratio ~0; attack ~34 / ~0.5)
 TH_RATE = 24     # bfi_count per 2s window

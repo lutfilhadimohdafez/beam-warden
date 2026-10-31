@@ -18,6 +18,7 @@ from pathlib import Path
 
 from mt76_telemetry import SSHConn, parse_iw_station_dump
 from gn630v_telemetry import compute_deltas
+from rig import RIG  # rig.conf creds, not hardcoded
 
 FIELDS = [
     "timestamp", "label", "condition",
@@ -84,10 +85,10 @@ def run(a: argparse.Namespace) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--host", default="192.168.1.1")
-    p.add_argument("--user", default="root")
-    p.add_argument("--password", default="admin")
-    p.add_argument("--iface", default="phy1-ap0")
+    p.add_argument("--host", default=RIG["ROUTER_HOST"])
+    p.add_argument("--user", default=RIG["ROUTER_USER"])
+    p.add_argument("--password", default=RIG["ROUTER_PASS"])
+    p.add_argument("--iface", default=RIG["ROUTER_AP_IFACE"])
     p.add_argument("--label", default="normal")
     p.add_argument("--condition", default="unknown")
     p.add_argument("--interval", type=float, default=2.0)
