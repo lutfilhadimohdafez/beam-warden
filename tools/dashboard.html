@@ -443,11 +443,11 @@
     background: linear-gradient(135deg, var(--panel) 0%, var(--panel-2) 100%);
     border: 1px solid var(--border);
     border-left: 4px solid var(--muted);
-    padding: 20px 28px;
-    margin-bottom: 24px;
+    padding: 11px 18px;
+    margin-bottom: 14px;
     display: flex;
     align-items: center;
-    gap: 36px;
+    gap: 22px;
     flex-wrap: wrap;
     box-shadow: var(--shadow-warm-lg);
     position: relative;
@@ -460,14 +460,14 @@
     background: linear-gradient(135deg, var(--danger-dim) 0%, var(--panel-2) 100%);
     box-shadow: 0 0 0 1px var(--danger), 0 0 28px rgba(240,72,72,0.35);
   }
-  .bfid-statuswrap { display: flex; flex-direction: column; gap: 2px; min-width: 240px; }
+  .bfid-statuswrap { display: flex; flex-direction: column; gap: 2px; min-width: 130px; }
   .bfid-eyebrow {
     font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.18em;
     text-transform: uppercase; color: var(--muted-dim); font-variant-caps: all-small-caps;
   }
   .bfid-status {
     font-family: var(--font-display);
-    font-size: 2.8rem;
+    font-size: 1.55rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     text-transform: uppercase;
@@ -476,11 +476,11 @@
   }
   .bfid-status.normal  { color: var(--ok); }
   .bfid-status.attack  { color: var(--danger); animation: pulse-text 1s ease-in-out infinite; }
-  .bfid-status.offline { color: var(--muted); font-size: 1.4rem; }
-  .bfid-readouts { display: flex; gap: 32px; flex-wrap: wrap; }
+  .bfid-status.offline { color: var(--muted); font-size: 1.15rem; }
+  .bfid-readouts { display: flex; gap: 20px; flex-wrap: wrap; }
   .bfid-ro { display: flex; flex-direction: column; gap: 3px; }
   .bfid-ro-val {
-    font-family: var(--font-mono); font-size: 2rem; font-weight: 700;
+    font-family: var(--font-mono); font-size: 1.25rem; font-weight: 700;
     font-variant-numeric: tabular-nums; color: var(--text-bright); letter-spacing: -0.03em; line-height: 1;
   }
   .bfid-ro-lbl {
@@ -500,7 +500,7 @@
     flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 4px;
     margin-left: auto; align-self: stretch;
   }
-  .bfid-spark canvas { width: 100%; height: 64px; display: block; }
+  .bfid-spark canvas { width: 100%; height: 40px; display: block; }
   .bfid-spark-cap {
     font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.08em;
     color: var(--muted-dim); text-transform: uppercase; font-variant-caps: all-small-caps;
@@ -1494,9 +1494,10 @@
     <!-- SESSION BAR -->
     <div class="session-bar stagger">
       <div class="session-bar-title">Session Source</div>
-      <div class="session-modes">
-        <button class="session-mode-btn active" data-session="replay">Replay</button>
-        <button class="session-mode-btn" data-session="live">Live</button>
+      <!-- replay mode shelved (live-only); markup + backend --replay kept, archived for future work -->
+      <div class="session-modes" style="display:none">
+        <button class="session-mode-btn" data-session="replay">Replay</button>
+        <button class="session-mode-btn active" data-session="live">Live</button>
       </div>
       <div class="session-fields" id="sessionReplayFields">
         <div class="session-field">
