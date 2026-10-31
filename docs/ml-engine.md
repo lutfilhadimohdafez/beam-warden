@@ -1,94 +1,92 @@
 # Beam Warden — ML Detection Engine (Objective 3)
 
-**How we detect the beamforming-spoofing attack from router telemetry, using an
-Isolation Forest.** For the team — this is what the ML engine does and which
-variables it uses.
+**How we detect the BeamCraft beamforming-feedback forgery attack — from the
+attack's own on-air signature.** For the team: what the engine does, which
+features it uses, and an honest read of how strong the result is.
+
+> Supersedes the earlier Isolation-Forest / 11-telemetry design. That approach
+> (unsupervised anomaly detection on router throughput/PHY counters) was built
+> but did not pan out: at a strong, close, single-stream link the attack barely
+> moves throughput/RSSI, so there was no reliable telemetry signal to learn. The
+> working detector reads the **attack's forged-BFI frames directly off-air.**
 
 ---
 
 ## 1. The idea in one line
 
-We can't get examples of every possible attack, but we *can* record lots of
-**normal** Wi-Fi behaviour. So we train a model to learn "what normal looks like,"
-then flag anything that **deviates** from normal as a possible attack. This is
-**anomaly detection**, not classification.
+The BeamCraft attack works by **injecting forged beamforming-feedback (BFI)
+frames** that impersonate the victim. Those injected frames are *themselves* the
+anomaly: during an attack the victim's BFI appears on-air far more often than the
+AP could possibly be sounding it, and the forgeries carry the **RETRY=1** bit.
+So we don't try to see the attack's *effect* on the link — we detect the
+**forgery storm** itself.
 
 ```
-   router telemetry ──► learn "normal" ──► score each new sample ──► NORMAL / 🚨 ATTACK
+   monitor victim's BFI frames ─► count per 2s window ─► rate doubled? ─► 🚨 ATTACK
 ```
+
+This matches the project title ("Beamforming **Anomaly** Detection") and the
+BeamCraft journal §6, which names retry/PER on the BFI frames as the strongest
+detection feature — far more robust than throughput, which is link-dependent.
 
 ---
 
-## 2. Why Isolation Forest (not a normal classifier)
+## 2. The features ⭐
 
-| Approach | Needs attack examples? | Catches unseen attacks? |
+Per **2-second window**, computed from the victim's VHT compressed-beamforming
+frames on-air (`wlan.fixed.category_code == 21`, `wlan.sa == <victim MAC>`):
+
+| Feature | What it is | Under attack |
 |---|---|---|
-| Classifier (e.g. SVM, NN) | **Yes** — must be trained on labelled attacks | No — only attacks it has seen |
-| **Isolation Forest (ours)** | **No** — trains on *normal only* | **Yes** — flags anything unusual |
+| `bfi_count` | victim BFI frames in the window | **~doubles** (genuine + injected forgeries) |
+| `bfi_rate` | `bfi_count / 2s` (frames/sec) | **spikes** |
+| `retry1_count` | how many carry the RETRY=1 bit | **spikes** (BeamCraft sets RETRY=1 on every forgery) |
+| `retry1_ratio` | `retry1_count / bfi_count` | **spikes** |
 
-**Isolation Forest** is an unsupervised anomaly detector. Intuition: it builds many
-random decision trees that keep splitting the data on random features at random
-thresholds. **Anomalies get "isolated" (cut off alone) after very few splits**,
-because they sit far from the dense cluster of normal points. Normal points need
-many splits to isolate. So:
+Measured separation on the real capture (40 normal / 20 attack windows):
 
 ```
-   short isolation path  =  unusual  =  ANOMALY  (low / negative score)
-   long isolation path   =  typical  =  NORMAL   (high / positive score)
+   normal window : ~8  BFI/s,  retry1 ≈ 0
+   attack window : ~16 BFI/s,  retry1 ≈ 17
 ```
 
-We use **200 trees** (`n_estimators=200`) and tell it we expect ~**2%** of training
-data to look odd (`contamination=0.02`). Trained only on the *normal* dataset.
+The classes are **widely, cleanly separable** — there is no overlap on
+`bfi_count`.
 
 ---
 
-## 3. The variables (features) the engine uses ⭐
+## 3. The model (and an honest note about it)
 
-The engine reads **11 telemetry variables per 2-second sample**. These are exactly
-the metrics that the BeamCraft attack disturbs — so a shift in them is our
-fingerprint of an attack.
+We report a **RandomForest** (200 trees) evaluated with **GroupKFold by phase**
+(each 20 s A/B/A phase is one group, so adjacent near-identical 2 s windows never
+straddle the train/test split — a leakage-safe estimate).
 
-| # | Variable (`column`) | What it is | Under attack it… |
-|---|---|---|---|
-| 1 | `throughput_tx_mbps` | uplink goodput (Mbps) | **collapses** |
-| 2 | `throughput_rx_mbps` | downlink goodput (Mbps) | **collapses** |
-| 3 | `retry_rate` | tx failures ÷ tx attempts | **spikes** (beam misaimed → retransmits) |
-| 4 | `tx_per_pct` | transmit packet-error rate (%) | **spikes** |
-| 5 | `rx_per_pct` | receive packet-error rate (%) | **spikes** |
-| 6 | `rssi0` | signal strength, antenna chain 0 (dBm) | **shifts** (beam energy redirected) |
-| 7 | `rssi1` | signal strength, chain 1 (dBm) | shifts |
-| 8 | `rssi2` | signal strength, chain 2 (dBm) | shifts |
-| 9 | `rssi3` | signal strength, chain 3 (dBm) | shifts |
-| 10 | `tx_mcs` | modulation/coding index (link rate) | **drops** (worse channel → lower rate) |
-| 11 | `tx_nss` | number of spatial streams | may drop |
+**Honest framing for the viva:** the real detector is **physics, not a 200-tree
+model** — a single threshold `bfi_count ≥ 24` already separates every window.
+The right thing to claim is: *injecting forged BFI unavoidably raises the on-air
+BFI rate, and that rate anomaly is what we detect.* The RandomForest is just the
+reported estimator; the signal is in the data.
 
-All 11 come straight from the router's `iwpriv <iface> stat` counters, collected by
-`tools/gn630v_telemetry.py`. The **attack signature** = throughput ⬇, PER & retry ⬆,
-MCS ⬇, RSSI shifted — and the Isolation Forest learns to notice that whole pattern
-at once, not any single metric.
+**Robustness:** dropping *both* RETRY features (keeping only `bfi_count` +
+`bfi_rate`) still gives 100%. So an attacker who omits the RETRY=1 marker does
+**not** evade detection — they cannot inject forgeries without raising the rate.
 
 ---
 
-## 4. The pipeline (train → score)
+## 4. Results & honest status
 
-```
-        ┌─────────────────────── TRAIN (once, offline) ───────────────────────┐
- normal │  normal_iperf.csv ─► pick the 11 features ─► StandardScaler (z-score) │
- data   │        ─► IsolationForest(200 trees).fit() ─► models/detector.joblib  │
-        └─────────────────────────────────────────────────────────────────────┘
-
-        ┌─────────────────────── SCORE (live, per sample) ────────────────────┐
- live   │  telemetry sample ─► same 11 features ─► same scaler.transform()     │
- sample │   ─► model.decision_function() ─► score  (>0 normal, <0 anomalous)   │
-        │   ─► model.predict() ─► verdict (+1 normal / −1 attack) ─► dashboard  │
-        └─────────────────────────────────────────────────────────────────────┘
-```
-
-- **StandardScaler** puts every variable on the same scale (z-score: subtract mean,
-  divide by std), so throughput (~98) and retry_rate (~0.13) get equal weight.
-- **`decision_function`** gives a continuous **anomaly score** (the dashboard plots
-  it; the 0 line is the decision boundary).
-- **`predict`** gives the hard verdict used for the 🚨 banner.
+- **OBJ3 target: ≥55% detection accuracy.**
+- **Achieved: 100%** (GroupKFold by phase, leakage-safe; every fold 100%), on
+  **real hardware** capture — no synthetic data.
+- ⚠️ **Scope limit, stated up front:** this is **within one condition** — one
+  ~6-minute capture, two 20 s attack bursts (≈2 truly independent attack events),
+  one distance/channel/traffic load. **Cross-condition generalisation is
+  untested** and is the honest next step: ≥3 captures across different days /
+  distances / channels / loads, reported as held-out-capture accuracy.
+- Packaging the engine into OpenWrt firmware as a standalone on-box service is
+  **future work** — detection needs a monitor-mode capture, and the AC2100's
+  mt7615 does not expose a monitor VIF alongside its AP, so today the engine runs
+  on the laptop's Alfa monitor beside the AP.
 
 ---
 
@@ -96,20 +94,10 @@ at once, not any single metric.
 
 | File | Role |
 |---|---|
-| `tools/train_detector.py` | trains the Isolation Forest on normal data → `models/detector.joblib` |
-| `models/detector.joblib` | the saved bundle: `{model, scaler, features}` |
-| `tools/dashboard.py` (`score_sample`) | loads the model, scores each live/replayed sample |
-| `tools/make_synthetic_attack.py` | builds a labelled *simulated* attack CSV for demoing detection before real attack data exists |
+| `tools/bfi_run.py` | capture harness — monitor mon0, A/B/A (normal→attack→normal), tcpdump → `data/bfi_<ts>.pcap` + `.phases.json` |
+| `tools/bfi_features.py` | offline — slices the pcap into labelled 2 s windows, trains, prints GroupKFold accuracy → `data/bfi_<ts>.windows.csv` |
+| `tools/dashboard.py` (`_bfi_verdict`, `--bfi-feed` / `--replay`) | live/replay detection stream to the dashboard |
+| `tools/dashboard.html` (BFI-Storm panel) | exhibition NORMAL↔ATTACK display |
 
-**Retrain:** `.venv/bin/python tools/train_detector.py`
-
----
-
-## 6. Current results & honest status
-
-- On **normal** telemetry: ~**2%** flagged (the expected false-positive floor).
-- On the **synthetic** attack set: **100%** of attack samples flagged.
-- ⚠️ The 100% is on *simulated* attack data we generated from the known BeamCraft
-  signature — a proof the **pipeline works**, not a real accuracy number. The real
-  detection-accuracy figure (proposal target **≥55%**) needs telemetry captured
-  during a **real** attack, which requires a 4×4-on-5GHz AP (the GN630v is 2×2).
+**Reproduce the number:**
+`.venv/bin/python tools/bfi_features.py --pcap data/bfi_<ts>.pcap --phases data/bfi_<ts>.phases.json`

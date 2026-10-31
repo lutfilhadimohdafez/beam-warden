@@ -1,0 +1,22 @@
+diff --git a/main_su.cpp b/main_su.cpp
+index 77531b5..7af147e 100644
+--- a/main_su.cpp
++++ b/main_su.cpp
+@@ -209,10 +209,15 @@ void re_beamforming(unsigned char *feedback, unsigned char *feedback_new,
+ 			for (int c = 0; c < Nc; c++) {
+ 				Eigen::VectorXcf r = R_rand.col(c);
+ 				Eigen::VectorXcf proj = Eigen::VectorXcf::Zero(Nr);
++				// bug-C fix (2026-10-31): match the VALIDATED pcap-mode forge
++				// (lines ~477/479). The old live math carried a spurious
++				// conj(V_j[0]) factor and a conjugated coefficient (r^H V_j vs
++				// V_j^H r), so the on-air null-steer forge != the one --pcap
++				// validates. Eigen .dot() is conj-linear in arg1: a.dot(b)=a^H b.
+ 				for (int j = 0; j < Nc; j++)
+-					proj += V[kk].col(j).adjoint()(0, 0) * r.dot(V[kk].col(j)) * V[kk].col(j);
++					proj += V[kk].col(j).dot(r) * V[kk].col(j);
+ 				for (int j = 0; j < c; j++)
+-					proj += W[kk].col(j).adjoint()(0, 0) * r.dot(W[kk].col(j)) * W[kk].col(j);
++					proj += W[kk].col(j).dot(r) * W[kk].col(j);
+ 				Eigen::VectorXcf residual = r - proj;
+ 				if (residual.norm() < 1e-6f) {
+ 					W[kk].col(c) = V[kk].col(c);

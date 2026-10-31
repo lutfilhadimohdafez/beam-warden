@@ -1,5 +1,12 @@
 # Beam Warden — System Architecture
 
+> ⚠️ **ML-engine note (31 Oct 2026):** the "learns" box below is described as an
+> Isolation Forest on router telemetry — that is superseded. The working detector
+> is a **BFI-storm anomaly detector** (RandomForest / rate threshold) that reads the
+> victim's on-air beamforming-feedback frames via a monitor NIC, not router PHY
+> counters. Topology is otherwise current (rig is now the AC2100). See
+> [`ml-engine.md`](ml-engine.md).
+
 How the pieces fit: who attacks, who senses, who learns, who decides. Grounds the
 proposal (§10 Principle of Operation, Objective 3, Appendix 16.1) against the real
 hardware we now have.

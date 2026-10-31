@@ -15,6 +15,7 @@ results/sessions/
 data/*.pcapng
 data/bfi_*_2026*.pcap
 data/victim_*.pcap
+data/*.pcap
 
 # flynn scratch job prompts — working inputs, not project docs
 docs/_flynn_*.md

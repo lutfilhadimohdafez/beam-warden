@@ -48,6 +48,7 @@ latest_sample: dict | None = None
 
 # ── runtime session state ─────────────────────────────────────────────────
 _current_task: asyncio.Task | None = None  # currently running producer task
+_bfi_detect_task: asyncio.Task | None = None  # OBJ3 BFI-storm verdict stream
 # last session state, so a tab that connects LATER can sync (not just tabs that
 # were open when it changed). Replayed to each new websocket on connect.
 LAST_SESSION: dict = {"type": "session", "source": "none", "detail": "disconnected"}
@@ -477,6 +478,152 @@ async def _producer_pcap(pcap_path: str) -> None:
         if not PLAYBACK["paused"]:
             PLAYBACK["idx"] = (PLAYBACK["idx"] + 1) % PLAYBACK["total"]
         await asyncio.sleep(args.interval)
+
+
+# ── BFI-storm sliding-window detector (OBJ3 live path) ────────────────────
+# During the BeamCraft attack the victim's on-air VHT compressed-BF (BFI) frame
+# rate roughly DOUBLES and RETRY=1 spikes. A plain threshold on frames/sec over
+# a sliding window already gives the OBJ3 100% number (bfi_features.py), so that
+# is all this does — no model to load at startup.
+BFI_VICTIM = "16:0f:02:1d:91:42"          # the EBF 5GHz client (see MEMORY)
+BFI_WINDOW_S = 2.0                          # match bfi_features default window
+_BFI_WINDOWS_CSV = (Path(__file__).resolve().parent.parent
+                    / "data" / "bfi_20261031_023539.windows.csv")
+
+
+def _load_bfi_thresholds(path: Path = _BFI_WINDOWS_CSV) -> tuple[float, float, float]:
+    """Derive (normal_hi, attack_lo, threshold) frames/sec from labelled windows.
+
+    The data separates cleanly (normal<=10, attack>=14), so the threshold is the
+    midpoint. Falls back to those known-good constants if the csv is gone.
+    """
+    normal: list[float] = []
+    attack: list[float] = []
+    try:
+        with path.open(newline="") as f:
+            for r in csv.DictReader(f):
+                (attack if r["label"] == "attack" else normal).append(float(r["bfi_rate"]))
+    except Exception:
+        pass
+    normal_hi = max(normal) if normal else 10.0
+    attack_lo = min(attack) if attack else 14.0
+    if attack_lo <= normal_hi:  # ponytail: no clean gap → park attack floor above normal
+        attack_lo = normal_hi + 2.0
+    return normal_hi, attack_lo, (normal_hi + attack_lo) / 2.0
+
+
+BFI_NORMAL_HI, BFI_ATTACK_LO, BFI_THRESHOLD = _load_bfi_thresholds()
+
+
+def _bfi_verdict(events, now: float, window: float = BFI_WINDOW_S) -> dict:
+    """Build a bfi_detect message from (epoch, retry_bit) events in [now-window, now)."""
+    lo = now - window
+    cnt = 0
+    retry1 = 0
+    for t, r in events:
+        if lo <= t < now:
+            cnt += 1
+            retry1 += r
+    rate = cnt / window
+    span = BFI_ATTACK_LO - BFI_NORMAL_HI
+    score = 0.0 if span <= 0 else (rate - BFI_NORMAL_HI) / span  # 0 at normal ceil, 1 at attack floor
+    score = max(0.0, min(1.0, score))
+    return {
+        "type": "bfi_detect",
+        "ts": round(now, 3),
+        "bfi_rate": round(rate, 2),
+        "retry1_count": retry1,
+        "score": round(score, 3),
+        "verdict": "attack" if rate >= BFI_THRESHOLD else "normal",
+    }
+
+
+def _bfi_feed_cmd(feed_path: str, iface: str = "mon0", victim: str = BFI_VICTIM) -> str:
+    """The tshark command the USER runs (privileged) to feed the live detector."""
+    return (f"tshark -l -i {iface} "
+            f"-Y 'wlan.fixed.category_code==21 && wlan.sa=={victim}' "
+            f"-T fields -e frame.time_epoch -e wlan.fc.retry > {feed_path}")
+
+
+async def _producer_bfi_detect(feed_path: str) -> None:
+    """Live OBJ3 path: tail the user's tshark TSV feed, emit a bfi_detect verdict ~1/s.
+
+    Each feed line is '<frame.time_epoch>\\t<wlan.fc.retry>'. The USER runs the
+    privileged monitor-mode tshark (printed at startup); we only read the file it
+    writes, so no hardware op happens in this process. Robust to the feed not
+    existing yet or tshark being restarted mid-run (re-opens on next tick).
+    """
+    events: deque = deque()
+    f = None
+    print(f"[bfi-detect] tailing feed {feed_path}", file=sys.stderr)
+    try:
+        while True:
+            if f is None:
+                try:
+                    f = open(feed_path, "r")
+                    f.seek(0, 2)  # tail: ignore frames captured before we attached
+                except OSError:
+                    await asyncio.sleep(0.5)
+                    continue
+            line = f.readline()
+            while line:
+                parts = line.split("\t")
+                if parts and parts[0].strip():
+                    try:
+                        ep = float(parts[0])
+                    except ValueError:
+                        line = f.readline()
+                        continue
+                    retry = 1 if (len(parts) > 1 and parts[1].strip() in ("1", "True")) else 0
+                    events.append((ep, retry))
+                line = f.readline()
+            # ponytail: now = wall clock; capture host IS this laptop, so frame
+            # epochs are wall-clock-comparable. If the attack stops, frames stop,
+            # the window drains and the verdict falls back to normal on its own.
+            now = time.time()
+            while events and events[0][0] < now - BFI_WINDOW_S * 2:
+                events.popleft()
+            await _broadcast(_bfi_verdict(events, now))
+            await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        if f is not None:
+            f.close()
+
+
+def _replay_verdicts(pcap: str, phases_path: str, victim: str = BFI_VICTIM,
+                     window: float = BFI_WINDOW_S, step: float = 1.0) -> list[tuple]:
+    """Replay a captured pcap through the detector. Returns [(t, msg, true_label), ...]."""
+    from bfi_features import extract, label_at  # reuse the OBJ3 extractor
+    phases = json.loads(Path(phases_path).read_text())
+    events = sorted(extract(pcap, victim))
+    t = min(p["t0"] for p in phases) + window
+    end = max(p["t1"] for p in phases)
+    out: list[tuple] = []
+    while t <= end:
+        out.append((t, _bfi_verdict(events, t, window), label_at(phases, t - window / 2)))
+        t += step
+    return out
+
+
+async def _producer_bfi_detect_replay(pcap: str, phases_path: str) -> None:
+    """Demo fallback: stream a captured pcap's verdicts over the websocket (~4x speed)."""
+    try:
+        rows = await asyncio.to_thread(_replay_verdicts, pcap, phases_path)
+    except Exception as exc:
+        await _broadcast({"type": "bfi_detect", "ts": time.time(), "bfi_rate": 0.0,
+                          "retry1_count": 0, "score": 0.0, "verdict": "normal",
+                          "error": str(exc)})
+        return
+    i = 0
+    while rows:
+        _t, msg, _lbl = rows[i % len(rows)]
+        out = dict(msg)
+        out["ts"] = time.time()  # live-advancing clock for the frontend
+        await _broadcast(out)
+        i += 1
+        await asyncio.sleep(0.25)
 
 
 # ── task runner: localhost guard ───────────────────────────────────────────
@@ -1700,12 +1847,24 @@ async def _lifespan(app):
     if getattr(args, "bfi_iface", None):
         _start_bfi(args.bfi_iface)
 
+    # OBJ3 BFI-storm detector — parallel verdict stream, independent of session.
+    global _bfi_detect_task
+    if getattr(args, "replay", None):
+        _bfi_detect_task = asyncio.create_task(
+            _producer_bfi_detect_replay(args.replay[0], args.replay[1]))
+    elif getattr(args, "bfi_feed", None):
+        print("[bfi-detect] USER runs this (mon0 already in monitor mode):\n  "
+              + _bfi_feed_cmd(args.bfi_feed), file=sys.stderr)
+        _bfi_detect_task = asyncio.create_task(_producer_bfi_detect(args.bfi_feed))
+
     try:
         yield
     finally:
         _stop_bfi()
         if _current_task is not None:
             _current_task.cancel()
+        if _bfi_detect_task is not None:
+            _bfi_detect_task.cancel()
 
 
 # ── routes ────────────────────────────────────────────────────────────────
@@ -1874,6 +2033,22 @@ def _selfcheck_calib() -> None:
     print("selfcheck-calib OK")
 
 
+def _selfcheck_bfi(pcap: str, phases_path: str) -> None:
+    """Replay the labelled pcap; assert the verdict tracks the label and flips N→A→N."""
+    rows = _replay_verdicts(pcap, phases_path)
+    assert rows, "no windows produced — check pcap/phases timestamps align"
+    labelled = [(m, lbl) for _t, m, lbl in rows if lbl]
+    agree = sum(1 for m, lbl in labelled if m["verdict"] == lbl)
+    acc = agree / len(labelled) if labelled else 0.0
+    seq = "".join("A" if m["verdict"] == "attack" else "N" for _t, m, _l in rows)
+    assert "NA" in seq and "AN" in seq, f"no normal→attack→normal flip: {seq}"
+    print(f"selfcheck-bfi OK: {len(labelled)} labelled windows, "
+          f"verdict/label agreement {acc*100:.1f}%, "
+          f"threshold={BFI_THRESHOLD:.1f} f/s (normal_hi={BFI_NORMAL_HI}, attack_lo={BFI_ATTACK_LO}), "
+          f"flips: {seq.count('NA')} on / {seq.count('AN')} off")
+    assert acc >= 0.9, f"agreement {acc*100:.1f}% below 90%"
+
+
 # ── CLI entry point ───────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
@@ -1896,12 +2071,24 @@ if __name__ == "__main__":
     p.add_argument("--bind", default="127.0.0.1")
     p.add_argument("--bfi-iface", default=None,
                     help="Monitor iface for live BFI stream (optional, parallel to telemetry)")
+    p.add_argument("--bfi-feed", default=None,
+                    help="Path to the tshark TSV feed to tail for live BFI-storm detection "
+                         "(the USER runs the printed privileged tshark that writes it)")
+    p.add_argument("--replay", nargs=2, metavar=("PCAP", "PHASES"), default=None,
+                    help="Demo fallback: replay a captured pcap + phases.json through the "
+                         "BFI-storm detector, streaming verdicts over the websocket")
     p.add_argument("--selfcheck-calib", action="store_true",
                     help="Run calibration profile self-check and exit")
+    p.add_argument("--selfcheck-bfi", nargs=2, metavar=("PCAP", "PHASES"), default=None,
+                    help="Validate the BFI-storm detector against a labelled pcap and exit")
     args = p.parse_args()
 
     if args.selfcheck_calib:
         _selfcheck_calib()
+        raise SystemExit(0)
+
+    if args.selfcheck_bfi:
+        _selfcheck_bfi(args.selfcheck_bfi[0], args.selfcheck_bfi[1])
         raise SystemExit(0)
 
     uvicorn.run(app, host=args.bind, port=args.port, log_level="info")

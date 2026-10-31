@@ -1,451 +1,135 @@
 #!/usr/bin/env python3
-"""Decode HE Compressed Beamforming Reports (BFI) from a pcap and emit
-per-frame CSI-style features as CSV.
+"""OBJ3 offline: BFI-storm pcap + phase timings -> labelled windows -> trained ML.
 
-Reads HE Action frames (category_code 30), extracts the Givens-rotation
-angles (phi / psi), and computes statistical features suitable for an
-anomaly-detection pipeline.
+Feature per time window (default 2s), from the victim's VHT compressed-BF frames:
+  bfi_count     : how many BFI frames on air       (spikes under forged injection)
+  retry1_count  : how many carry the RETRY=1 bit    (BeamCraft's forgery marker)
+  bfi_rate      : bfi_count / window seconds
+  retry1_ratio  : retry1_count / bfi_count
+Attack windows carry genuine + injected forged BFI, so the counts separate cleanly
+from normal. Reports RandomForest 5-fold CV accuracy = the OBJ3 detection number.
 
-Requires: tshark.  stdlib + numpy only.
+No root. Run: .venv/bin/python tools/bfi_features.py --pcap data/bfi_*.pcap --phases data/bfi_*.phases.json
 """
-
-from __future__ import annotations
-
 import argparse
 import csv
-import os
-import re
+import json
+import statistics as st
 import subprocess
-import sys
-import tempfile
-import threading
-import time
-from typing import Dict, Iterator, List, Tuple
+from collections import Counter
+from pathlib import Path
 
-import numpy as np
+FIELDS = ["bfi_count", "retry1_count", "bfi_rate", "retry1_ratio", "label"]
 
 
-# ---------------------------------------------------------------------------
-# Extraction helpers  (tshark-based, matches bfi_capture.py style)
-# ---------------------------------------------------------------------------
-
-def _meta_rows(pcap: str) -> List[Tuple[str, str, int]]:
-    """Return list of (frame_number, mimo_ctrl_uint40_hex, report_len) for HE BFI frames."""
-    out = subprocess.run(
-        ["tshark", "-r", pcap, "-Y", "wlan.fixed.category_code==30",
-         "-T", "fields",
-         "-e", "frame.number",
-         "-e", "wlan.he.action.he_mimo_control",
-         "-e", "wlan.he.action.he_mimo_control.report_len"],
-        capture_output=True, text=True,
-    ).stdout.splitlines()
-    rows: List[Tuple[str, str, int]] = []
-    for line in out:
-        parts = line.split("\t")
-        if len(parts) >= 3 and parts[1]:
-            rows.append((parts[0], parts[1], int(parts[2]) if parts[2] else 0))
-    return rows
+def sh(c):
+    return subprocess.run(c, shell=True, text=True, capture_output=True).stdout
 
 
-def _frame_bytes(pcap: str, fn: str) -> bytes:
-    """Return raw bytes of a single frame (by frame number) from a pcap."""
-    raw = subprocess.run(
-        ["tshark", "-r", pcap, "-Y", f"frame.number=={fn}", "-x"],
-        capture_output=True, text=True,
-    ).stdout
-    return _parse_hex_dump(raw)
+def extract(pcap, victim):
+    """(epoch, retry_bit) for every victim VHT compressed-BF frame in the pcap."""
+    raw = sh(f"tshark -r {pcap} -Y 'wlan.fixed.category_code==21 && wlan.sa=={victim}' "
+             f"-T fields -e frame.time_epoch -e wlan.fc.retry 2>/dev/null")
+    out = []
+    for ln in raw.splitlines():
+        parts = ln.split("\t")
+        if parts and parts[0]:
+            r = 1 if (len(parts) > 1 and parts[1].strip() in ("1", "True")) else 0
+            out.append((float(parts[0]), r))
+    return out
 
 
-def _all_frame_bytes(pcap: str, frame_numbers: List[str] | None = None) -> Dict[str, bytes]:
-    """Single tshark call: return {frame_number: raw_bytes} for all HE BFI frames.
-
-    One `tshark -x` pass emits per-frame hex dumps separated by blank lines, in
-    capture order. We zip those blocks positionally with the frame numbers from
-    the SAME cat-30 filter (identical order), avoiding fragile in-band parsing.
-    """
-    raw = subprocess.run(
-        ["tshark", "-r", pcap, "-Y", "wlan.fixed.category_code==30", "-x"],
-        capture_output=True, text=True,
-    ).stdout
-    blocks = [blk for blk in raw.split("\n\n") if blk.strip()]
-    if frame_numbers is None:
-        frame_numbers = [r[0] for r in _meta_rows(pcap)]
-    frames: Dict[str, bytes] = {}
-    for fn, blk in zip(frame_numbers, blocks):
-        frames[fn] = _parse_hex_dump(blk)
-    return frames
+def label_at(phases, t):
+    for ph in phases:
+        if ph["t0"] <= t < ph["t1"]:
+            return ph["label"]
+    return None
 
 
-def _parse_hex_dump(text: str) -> bytes:
-    """Parse tshark -x hex dump text into raw bytes."""
-    out = bytearray()
-    for line in text.splitlines():
-        m = re.match(r'^([0-9a-fA-F]{4,})\s+((?:[0-9a-fA-F]{2} ?){1,16})', line)
-        if m:
-            for tok in m.group(2).split():
-                out.append(int(tok, 16))
-    return bytes(out)
+def window(bfi, phases, win):
+    """Returns (rows, groups). groups[i] = the phase-id window i came from, so CV
+    can hold out whole phases (leak-safe — adjacent 2s windows never straddle the
+    train/test split). Flynn audit 2026-10-31: number is unchanged vs shuffled CV,
+    but this is the methodology an examiner won't be able to attack."""
+    rows, groups = [], []
+    t = min(p["t0"] for p in phases)
+    end = max(p["t1"] for p in phases)
+    while t < end:
+        w0, w1 = t, t + win
+        mid = (w0 + w1) / 2
+        ph = next((p for p in phases if p["t0"] <= mid < p["t1"]), None)
+        if ph:
+            cnt = sum(1 for bt, _ in bfi if w0 <= bt < w1)
+            ret = sum(r for bt, r in bfi if w0 <= bt < w1)
+            rows.append({"bfi_count": cnt, "retry1_count": ret,
+                         "bfi_rate": cnt / win,
+                         "retry1_ratio": (ret / cnt if cnt else 0.0),
+                         "label": ph["label"]})
+            groups.append(ph["condition"])
+        t = w1
+    return rows, groups
 
 
-def _mimo_and_report(
-    pcap: str, fn: str, mc_hex: str, report_len: int,
-    frame_bytes_cache: Dict[str, bytes] | None = None,
-) -> Dict[str, object]:
-    """Decode the HE MIMO Control field and extract the beamforming report."""
-    val = int(mc_hex, 16)
-    mc_bytes = bytes((val >> (8 * i)) & 0xFF for i in range(5))  # uint40 LE → 5 bytes
-    nc = (val & 0x7) + 1
-    nr = ((val >> 3) & 0x7) + 1
-    codebook = (val >> 9) & 0x1
-    feedback_type = (val >> 10) & 0x3
-    if frame_bytes_cache is not None:
-        fb = frame_bytes_cache.get(fn, b"")
-    else:
-        fb = _frame_bytes(pcap, fn)
-    idx = fb.find(mc_bytes)
-    # report follows the 5-byte MIMO control; drop trailing 4-byte FCS if present
-    report = fb[idx + 5:] if idx >= 0 else b""
-    if len(report) > 4:
-        report = report[:-4]  # strip FCS
-    return dict(nr=nr, nc=nc, codebook=codebook, feedback_type=feedback_type, report=report)
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--pcap", required=True)
+    p.add_argument("--phases", required=True)
+    p.add_argument("--victim", default="16:0f:02:1d:91:42")
+    p.add_argument("--win", type=float, default=2.0)
+    p.add_argument("--out", default=None)
+    a = p.parse_args()
 
-
-# ---------------------------------------------------------------------------
-# Decode math  (ported from BeamCraft_AE/main_su.cpp)
-# ---------------------------------------------------------------------------
-
-def compute_NANG(Nr: int, Nc: int) -> int:
-    """Total number of angles for a given antenna geometry."""
-    nang = 0
-    p = min(Nc, Nr - 1)
-    for i in range(1, p + 1):
-        nang += 2 * (Nr - i)
-    return nang
-
-
-def get_bitwidths(feedback_type: int, codebook: int) -> Tuple[int, int]:
-    """Return (b_phi, b_psi) for the given feedback type and codebook."""
-    if feedback_type == 0:  # SU
-        if codebook == 0:
-            return 4, 2
-        return 6, 4
-    if feedback_type == 1:  # MU
-        if codebook == 0:
-            return 7, 5
-        return 9, 7
-    return 4, 2  # fallback
-
-
-def decode_angles(
-    report: bytes, Nr: int, Nc: int, b_phi: int, b_psi: int,
-) -> Tuple[np.ndarray, List[bool], int]:
-    """Decode beamforming report into an (NANG, Nst) angle matrix.
-
-    Bit-ordering (per C++ reference):
-      - Per byte: MSB-first → reversed (LSB-first), concatenate.
-      - Per angle slice: take b_phi/b_psi chars, reverse, interpret as integer.
-      - phi value = (2*raw+1) / 2**b_phi
-      - psi value = (2*raw+1) / 2**(b_psi+2)
-
-    Returns (angles, is_phi, Nst).
-    """
-    NANG = compute_NANG(Nr, Nc)
-
-    # Build bitstring: per byte, MSB-first then reversed → LSB-first
-    bitstr = ""
-    for byte in report:
-        bitstr += f"{byte:08b}"[::-1]
-
-    total_bits = len(bitstr)
-    # NANG is even; per subcarrier #phi == #psi == NANG//2
-    bits_per_sc = (NANG // 2) * (b_phi + b_psi)
-    if bits_per_sc == 0:
-        return np.zeros((NANG, 0), dtype=np.float64), [False] * NANG, 0
-    Nst = total_bits // bits_per_sc
-
-    angles = np.zeros((NANG, Nst), dtype=np.float64)
-    is_phi: List[bool] = [False] * NANG
-
-    pos = 0
-    for kk in range(Nst):
-        angcnt = 0
-        for ii in range(Nr - 1, max(Nr - Nc, 1) - 1, -1):
-            # phi angles
-            for _jj in range(ii):
-                raw = int(bitstr[pos:pos + b_phi][::-1], 2)
-                angles[angcnt, kk] = (2 * raw + 1) / (2 ** b_phi)
-                is_phi[angcnt] = True
-                pos += b_phi
-                angcnt += 1
-            # psi angles
-            for _jj in range(ii):
-                raw = int(bitstr[pos:pos + b_psi][::-1], 2)
-                angles[angcnt, kk] = (2 * raw + 1) / (2 ** (b_psi + 2))
-                is_phi[angcnt] = False
-                pos += b_psi
-                angcnt += 1
-
-    return angles, is_phi, Nst
-
-
-# ---------------------------------------------------------------------------
-# Feature extraction
-# ---------------------------------------------------------------------------
-
-FEATURE_COLUMNS = [
-    "frame", "nr", "nc", "nst", "nang",
-    "bfi_phi_mean", "bfi_psi_mean",
-    "bfi_angle_var", "bfi_subcarrier_var",
-    "bfi_phi_temporal_var", "bfi_psi_temporal_var",
-]
-
-
-def frame_to_features(
-    report: bytes,
-    nr: int,
-    nc: int,
-    codebook: int,
-    feedback_type: int,
-    window_state: Dict[str, List[float]],
-    frame_id: int = 0,
-    window: int = 10,
-) -> Dict[str, float] | None:
-    """Decode one beamforming report into a feature dict.
-
-    *window_state* is mutated in-place (phi/psi rolling history) so the caller
-    can maintain temporal-var state across calls.  Returns None if the report
-    is empty or decodes to Nst==0.
-    """
-    if not report:
-        return None
-
-    b_phi, b_psi = get_bitwidths(feedback_type, codebook)
-    angles, is_phi_mask, Nst = decode_angles(report, nr, nc, b_phi, b_psi)
-
-    if Nst == 0:
-        return None
-
-    NANG = compute_NANG(nr, nc)
-    phi_mask = np.array(is_phi_mask, dtype=bool)
-    psi_mask = ~phi_mask
-
-    phi_mean = float(np.mean(angles[phi_mask])) if np.any(phi_mask) else 0.0
-    psi_mean = float(np.mean(angles[psi_mask])) if np.any(psi_mask) else 0.0
-
-    ws_phi = window_state.setdefault("phi", [])
-    ws_psi = window_state.setdefault("psi", [])
-    ws_phi.append(phi_mean)
-    ws_psi.append(psi_mean)
-
-    if len(ws_phi) >= window:
-        phi_temp_var = float(np.var(ws_phi[-window:]))
-        psi_temp_var = float(np.var(ws_psi[-window:]))
-    else:
-        phi_temp_var = 0.0
-        psi_temp_var = 0.0
-
-    return {
-        "frame": frame_id,
-        "nr": nr,
-        "nc": nc,
-        "nst": Nst,
-        "nang": NANG,
-        "bfi_phi_mean": phi_mean,
-        "bfi_psi_mean": psi_mean,
-        "bfi_angle_var": float(np.var(angles)),
-        "bfi_subcarrier_var": float(np.mean(np.var(angles, axis=1))),
-        "bfi_phi_temporal_var": phi_temp_var,
-        "bfi_psi_temporal_var": psi_temp_var,
-    }
-
-
-def extract_features(
-    pcap: str, window: int = 10,
-) -> List[Dict[str, float]]:
-    """Decode all HE BFI frames in *pcap* and return per-frame feature rows."""
-    rows = _meta_rows(pcap)
+    phases = json.loads(Path(a.phases).read_text())
+    bfi = extract(a.pcap, a.victim)
+    rows, groups = window(bfi, phases, a.win)
     if not rows:
-        return []
+        raise SystemExit("no labelled windows — check pcap/phases timestamps align.")
 
-    fb_cache = _all_frame_bytes(pcap, frame_numbers=[r[0] for r in rows])
+    out = Path(a.out) if a.out else Path(a.pcap).with_suffix(".windows.csv")
+    with out.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
 
-    features: List[Dict[str, float]] = []
-    window_state: Dict[str, List[float]] = {}
+    print(f"victim BFI frames: {len(bfi)}   windows: {len(rows)}  {Counter(r['label'] for r in rows)}")
+    for lbl in ("normal", "attack"):
+        v = [r["bfi_count"] for r in rows if r["label"] == lbl]
+        rt = [r["retry1_count"] for r in rows if r["label"] == lbl]
+        if v:
+            print(f"  {lbl:7} mean bfi/window={st.mean(v):5.1f}  mean retry1/window={st.mean(rt):5.1f}")
+    print(f"csv: {out}")
 
-    for fn, mc_hex, rl in rows:
-        info = _mimo_and_report(pcap, fn, mc_hex, rl, frame_bytes_cache=fb_cache)
-        Nr = int(info["nr"])
-        Nc = int(info["nc"])
-        report = info["report"]
-        assert isinstance(report, bytes)
-
-        feat = frame_to_features(
-            report, Nr, Nc,
-            int(info["codebook"]), int(info["feedback_type"]),
-            window_state, frame_id=int(fn), window=window,
-        )
-        if feat is not None:
-            features.append(feat)
-
-    return features
-
-
-# ---------------------------------------------------------------------------
-# Live streaming
-# ---------------------------------------------------------------------------
-
-BURST = 3  # seconds per capture burst; latency ceiling ≈ BURST seconds (batchy)
-
-
-def stream_features(
-    iface: str,
-    duration: int = 0,
-    window: int = 10,
-    stop_event: threading.Event | None = None,
-) -> Iterator[Dict[str, float]]:
-    """Yield feature dicts from live BFI capture on *iface*.
-
-    Captures short bounded bursts (BURST seconds) into a fresh temp pcap each
-    cycle, decodes the full small file, then unlinks it.  Temporal-var window
-    state and frame_id persist across bursts so continuity is preserved.
-
-    If *stop_event* is provided, setting it breaks the loop promptly and
-    terminates any running tshark subprocess.
-
-    ponytail: latency ceiling is ~BURST seconds (batchy), not 0.5s.
-    BURST is the tuning knob.
-    """
-    window_state: Dict[str, List[float]] = {}
-    local_counter = 0
-    deadline = time.time() + duration if duration > 0 else float("inf")
-    err_holder: list[str] = []
-
+    # OBJ3 number: GroupKFold by phase (leak-safe — Flynn audit 2026-10-31).
+    # Honest framing: the detector is really a threshold on the doubled on-air BFI
+    # rate (physics of injection), robust even without the RETRY marker; the RF is
+    # just the reported estimator. Within-condition only — cross-condition (other
+    # distance/channel/load) is untested future work; don't over-claim at viva.
+    labels = sorted({r["label"] for r in rows})
+    if len(labels) < 2:
+        print("only one class present — need an attack phase that injected. Skipping train.")
+        return
     try:
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                break
-            if time.time() >= deadline:
-                break
-
-            remaining = deadline - time.time()
-            burst = min(BURST, remaining) if duration > 0 else BURST
-            if burst <= 0:
-                break
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
-            tmp_path = tmp.name
-            tmp.close()
-
-            cmd = [
-                "tshark", "-i", iface,
-                "-p",  # no promisc: redundant in monitor mode, and the per-burst
-                       # toggle spams dmesg "entered/left promiscuous mode"
-                "-w", tmp_path,
-                "-a", f"duration:{burst}",
-            ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            # poll for stop_event while tshark runs
-            while proc.poll() is None:
-                if stop_event is not None and stop_event.is_set():
-                    proc.terminate()
-                    break
-                time.sleep(0.1)
-
-            if proc.returncode is not None and proc.returncode != 0:
-                try:
-                    err_holder.append(proc.stderr.read().decode())
-                except Exception:
-                    pass
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                break
-
-            try:
-                rows = _meta_rows(tmp_path)
-                if rows:
-                    fb_cache = _all_frame_bytes(
-                        tmp_path, frame_numbers=[r[0] for r in rows]
-                    )
-                    for fn, mc_hex, rl in rows:
-                        info = _mimo_and_report(
-                            tmp_path, fn, mc_hex, rl,
-                            frame_bytes_cache=fb_cache,
-                        )
-                        local_counter += 1
-                        feat = frame_to_features(
-                            info["report"],
-                            int(info["nr"]), int(info["nc"]),
-                            int(info["codebook"]), int(info["feedback_type"]),
-                            window_state, frame_id=local_counter, window=window,
-                        )
-                        if feat is not None:
-                            yield feat
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-            if stop_event is not None and stop_event.is_set():
-                break
-
-    finally:
-        pass
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pcap", help="Input pcap with HE BFI frames (offline mode)")
-    parser.add_argument("--out", help="Output CSV path (offline mode)")
-    parser.add_argument("--live", metavar="IFACE",
-                        help="Live capture mode: monitor-mode interface (e.g. mon0)")
-    parser.add_argument("--duration", type=int, default=0,
-                        help="Live capture duration in seconds (0=unlimited)")
-    parser.add_argument("--window", type=int, default=10,
-                        help="Rolling window size for temporal variance")
-    args = parser.parse_args()
-
-    if args.live:
-        import json as _json
-        count = 0
-        for feat in stream_features(args.live, duration=args.duration, window=args.window):
-            print(_json.dumps(feat), flush=True)
-            count += 1
-        if count == 0:
-            print("No HE BFI frames captured.", file=sys.stderr)
-            sys.exit(1)
-
-    elif args.pcap and args.out:
-        features = extract_features(args.pcap, window=args.window)
-        if not features:
-            print("No HE BFI frames found.", file=sys.stderr)
-            sys.exit(1)
-
-        with open(args.out, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=FEATURE_COLUMNS)
-            writer.writeheader()
-            writer.writerows(features)
-
-        nr = features[0]["nr"]
-        nc = features[0]["nc"]
-        nst = features[0]["nst"]
-        nang = features[0]["nang"]
-        mean_vals = {col: np.mean([r[col] for r in features]) for col in FEATURE_COLUMNS[5:]}
-        summary_parts = "  ".join(f"{k}={v:.4f}" for k, v in mean_vals.items())
-        print(
-            f"{len(features)} frames decoded  Nr={nr} Nc={nc} Nst={nst} NANG={nang}  "
-            f"{summary_parts}"
-        )
-
-    else:
-        parser.error("Either --pcap + --out (offline) or --live <iface> (live) required")
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.model_selection import GroupKFold, cross_val_score
+    except ImportError:
+        print("(sklearn missing — CSV written; train with train_supervised.py)")
+        return
+    X = [[r["bfi_count"], r["retry1_count"], r["bfi_rate"], r["retry1_ratio"]] for r in rows]
+    y = [1 if r["label"] == "attack" else 0 for r in rows]
+    n_groups = len(set(groups))
+    if n_groups < 2:
+        print("need >=2 phases (groups) for leak-safe CV.")
+        return
+    k = min(n_groups, 6)
+    clf = RandomForestClassifier(n_estimators=200, random_state=0)
+    acc = cross_val_score(clf, X, y, groups=groups, cv=GroupKFold(n_splits=k),
+                          scoring="accuracy")
+    print("\n" + "=" * 60)
+    print(f"OBJ3 detection accuracy (GroupKFold by phase, {k} folds): {acc.mean()*100:.1f}%"
+          f"  (target >=55%)")
+    print(f"  per-fold: {[f'{x*100:.0f}' for x in acc]}")
+    print("  note: within-condition (1 capture); cross-condition = future work")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

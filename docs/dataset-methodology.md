@@ -1,5 +1,14 @@
 # Beam Warden — Dataset & Detection Methodology
 
+> ⚠️ **Superseded direction (kept for rigor notes).** This doc planned a
+> throughput/PHY-telemetry IsolationForest dataset. The detector that shipped
+> instead reads the **on-air BFI storm** (`tools/bfi_features.py`): per-2s-window
+> `bfi_count`/`retry1`, labelled by attack phase, evaluated with GroupKFold-by-phase.
+> Its still-valid warnings — leakage-safe (grouped/blocked) CV, multi-condition
+> capture — were applied: see [`ml-engine.md`](ml-engine.md). Current real dataset:
+> `data/bfi_<ts>.windows.csv`; OBJ3 = 100% within-condition, cross-condition is
+> the open item this doc's multi-condition advice addresses.
+
 *How to build a large, defensible dataset and a sound anomaly-detection pipeline for
 detecting BFI-spoofing (BeamCraft null-steering) on 802.11ac/ax, replacing the current
 150-sample single-condition IsolationForest.* (Compiled from a research pass; sources

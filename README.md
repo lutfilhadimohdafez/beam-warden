@@ -12,8 +12,8 @@ and inject it as if it came from the victim — hijacking the AP's beam and cutt
 the victim's throughput by up to **83%** (the *BeamCraft* attack).
 
 **Beam Warden** (1) replicates that attack against real hardware, and (2) detects
-it from router PHY telemetry using an unsupervised ML model (Isolation Forest) —
-without touching the Wi-Fi protocol itself.
+it from the attack's own **on-air forged-BFI signature** using an ML anomaly
+detector — without touching the Wi-Fi protocol itself.
 
 ---
 
@@ -21,17 +21,19 @@ without touching the Wi-Fi protocol itself.
 
 | # | Objective | Target | Status |
 |---|-----------|--------|--------|
-| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **DONE (clean)** — live attack on the 4×4 AX3200 cuts **downlink throughput ~48–53%** with RSSI held flat (~1 dB) and full recovery; confound-free A/B/A, `data/tput_aba_bursty_android_clean_0{1,2}.csv` |
-| 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — telnet capture + normal dataset + live dashboard |
-| 3 | ML anomaly detection | ≥55% accuracy | 🟡 **unblocked, one capture away** — Isolation Forest + evaluator built; live attack now works, so the real labelled attack telemetry is finally capturable (`telemetry_capture.py`) |
+| 1 | Replicate a forged-BFI attack | ≥51% success | 🟢 **attack replicated** — live forged-BFI injection proven on the AC2100 (386 frames/run, no crash, 4×1 null-steer, forge matches the validated math). Throughput drop: AX3200 prior −48–53%; AC2100 lag-aware re-measure in progress (−36% at 6 dBm, auto-sweeping power down to clear ≥51% — `tools/obj1_auto.py`) |
+| 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — SSH `station dump` capture + real datasets + live dashboard; attack moves retry **5.4×** and throughput **−36%** (≫15% variance) |
+| 3 | ML anomaly detection | ≥55% accuracy | 🟢 **ACHIEVED — 100%** — BFI-storm anomaly detection on **real** data, leakage-safe GroupKFold (every fold 100%). *Within one condition*; cross-condition is honest future work. `tools/bfi_run.py` + `tools/bfi_features.py` |
 
-**Update — 2026-10-12:** Objective 1 finished with a *clean* number — the live
-attack halves downlink throughput while signal stays flat (the earlier "−55%"
-was confounded by RSSI drift). Added a **telnet transport** to
-`telemetry_capture.py` (the 4×4 router is telnet-only) and a **`--bitrate` cap**
-to the A/B/A harness for realistic sub-saturation load. Objective 3's only
-remaining step is one paired normal/attack 11-feature capture → `eval_detector`.
-Full writeup: [`docs/progress-reports/progress-report-2026-10-12.md`](docs/progress-reports/progress-report-2026-10-12.md).
+**Update — 2026-10-31:** The months-long "attack injects 0 / no BFI captured"
+blocker was **degraded Alfa firmware** (`modprobe -r mt7921u; modprobe mt7921u`
+restores VHT capture — now baked into the harness). With that fixed: forged-BFI
+capture → forge → inject all work live (no laptop crash), **OBJ3 landed at 100%**
+via the on-air BFI-storm signature (not the old throughput-telemetry route), and
+a live detection panel was wired into the dashboard. The current rig geometry is
+**4×1 (non-square → null-steer)** and the live-inject forge was corrected to match
+the pcap-validated math. Prior Isolation-Forest / 11-telemetry work is superseded
+— see [`docs/ml-engine.md`](docs/ml-engine.md).
 
 **Proven on hardware this cycle:** the attacker (Alfa AWUS036ACM) injects crafted
 802.11 frames onto the target's channel (30/30 ACKs); the target emits real
@@ -338,7 +340,7 @@ source MAC — nothing in 802.11 lets the AP tell a forged report from a real on
  ┌──────┴───────────────────┐              ┌───────────────────────────┐
  │ ATTACKER  (Alfa MT7921)  │              │  TELEMETRY + ML (this PC) │
  │ monitor+inject on mon0   │              │  collector → dashboard    │
- │ main_su (BeamCraft SU)   │              │  → Isolation Forest → 🚨  │
+ │ main_su (BeamCraft SU)   │              │  → BFI-storm detector → 🚨│
  └──────────────────────────┘              └───────────────────────────┘
 ```
 
@@ -386,63 +388,40 @@ then plug those into `main_su`. Turns "decode HE from scratch" into "set 4 value
      tx_mcs / tx_nss ── modulation ──────────────────────► drops
         │  --label normal | attack
         ▼
-   CSV dataset  →  Isolation Forest (train on NORMAL only)  →  anomaly score  →  🚨
+   per-2s BFI features  →  anomaly detector  →  verdict  →  🚨   (current: §7.1)
 ```
 
-**Why Isolation Forest?** We reliably have only *normal* traffic to learn from;
-attacks are rare and varied. Unsupervised anomaly detection trains on normal and
-flags whatever "isolates" too easily — catching an attack it never trained on.
+> **Note:** the counter pipeline above (and §7.2–7.3 below) is the *original*
+> throughput-telemetry detection plan, kept as Objective-2 context. The detector
+> that actually works reads the on-air **BFI storm** — see §7.1.
 
-### 7.1 How the ML engine actually works
+### 7.1 How the ML engine works (current — BFI-storm detection)
 
-The engine **never learns what an attack looks like** — it learns only what
-*normal* looks like, then flags anything that does not fit (one-class / unsupervised
-anomaly detection). It is two small pieces, not a monolith:
+> **Superseded:** the throughput/PHY-telemetry → Isolation-Forest plan described
+> below (§7's counter pipeline) was built and did not pan out — at a strong,
+> close, single-stream link the attack barely moves throughput/RSSI, so there was
+> no reliable telemetry signal. Detection moved to the attack's **own on-air
+> forged-BFI frames.** Full method + honest caveats: [`docs/ml-engine.md`](docs/ml-engine.md).
 
-| Stage | Code | What happens |
+The attack **injects forged BFI frames** impersonating the victim — it cannot
+avoid putting them on-air. Beam-Warden sniffs the victim's VHT compressed-beamforming
+frames (monitor mode) and counts them per **2-second window**. During an attack
+the forged frames roughly **double** the on-air BFI rate and carry the **RETRY=1**
+bit:
+
+| Feature (per 2 s window) | normal | attack |
 |---|---|---|
-| Train | `tools/train_detector.py` | `StandardScaler` learns the mean/spread of normal, then `IsolationForest(200 trees, contamination 0.02)` learns the *shape/density* of normal. Saved as `models/detector.joblib` = `{model, scaler, features}`. |
-| Score | `tools/dashboard.py::score_sample()` | Each live sample → same scaler → `decision_function` (continuous, + = normal, − = anomaly) + `predict` (+1 normal / −1 attack badge). |
+| `bfi_count` / `bfi_rate` | ~8/s | **~16/s** |
+| `retry1_count` / `retry1_ratio` | ≈0 | **spikes** (forgery marker) |
 
-**The trick (Isolation Forest):** build 200 trees, each repeatedly splitting on a
-*random feature* at a *random value* until every point is isolated. Anomalies sit
-in sparse regions, so they isolate in **few** splits (short path); normal points
-are buried in a dense crowd and take **many** splits. Short average path length =
-anomalous. `contamination=0.02` sets the +1/−1 threshold (≈2% training FPR). The
-same `scaler` + `features` travel inside the `.joblib` from train to score, so a
-live sample is judged against normal on identical footing.
+The classes are widely separable (a threshold `bfi_count ≥ 24` alone splits them).
+Reported via a **RandomForest with GroupKFold-by-phase** (leakage-safe): **100%
+detection** on real hardware, every fold — and still 100% with the RETRY features
+removed, so an attacker who hides the marker is still caught by the rate anomaly.
+*Within one capture/condition so far; cross-condition is honest future work.*
 
-### 7.2 Two feature sources
-
-The detector is fed by **two independent vantages** of the same link:
-
-```
-  A. MAC counters   telnet → AX3200 → iwpriv wl0 stat    (the §7 pipeline)
-     throughput, retry_rate, tx/rx_per, rssi0..3, tx_mcs, tx_nss
-     → sees the AFTERMATH (throughput drop, PER spike)
-
-  B. BFI / CSI      Alfa in MONITOR mode → sniffs the air (OFF-AIR)
-     the victim's HE Compressed Beamforming Report, decoded to Givens angles
-     → sees the FORGERY ITSELF (the exact frame BeamCraft manipulates)
-```
-
-**BFI/CSI pipeline (`tools/bfi_features.py`):** decodes captured HE compressed
-beamforming reports (φ/ψ Givens angles, ported and V-unitarity-validated from
-`main_su.cpp`) into per-frame CSI-style features:
-
-| Feature | Meaning |
-|---|---|
-| `bfi_phi_mean`, `bfi_psi_mean` | phase / amplitude geometry of the steering matrix |
-| `bfi_angle_var` | CSI-matrix variance |
-| `bfi_subcarrier_var` | variance across subcarriers = multipath / frequency selectivity |
-| `bfi_phi/psi_temporal_var` | frame-to-frame channel stability (rolling window) |
-
-Because BFI is captured **off-air**, these CSI features work regardless of AP.
-With the AX3200 online we now have a **real 4×4 normal dataset**
-(`data/bfi_ax3200_4x4_features.csv`); the synthetic generator
-(`tools/make_synthetic_bfi_attack.py`, 98.8% detection / 2.3% FP) still stands in
-for the attack class until the live injection dataset is captured. *(Raw per-subcarrier CSI would need PicoScenes + an
-AX210 + Ubuntu — see Future Work.)*
+Pipeline: `tools/bfi_run.py` (capture + inject + sniff) → `tools/bfi_features.py`
+(window + train) → live panel in `tools/dashboard.py` (`--bfi-feed` / `--replay`).
 
 ---
 
@@ -561,7 +540,7 @@ busy in monitor mode).
 | 2×2 dev AP / normal-traffic leg | Skyworth **GN630v** ONT — MediaTek **MT7916**, 5 GHz ch48, SU/MU HE beamforming |
 | Attacker NIC | Alfa **AWUS036ACM** — MediaTek **MT7921** (`mt76`), monitor + injection |
 | Attack code | C++ (`main_su`), libpcap, Eigen3; aircrack-ng for injection verification |
-| Telemetry + ML | Python 3, Starlette/uvicorn (dashboard), scikit-learn (Isolation Forest) |
+| Telemetry + ML | Python 3, Starlette/uvicorn (dashboard), scikit-learn (RandomForest / threshold on BFI-rate) |
 | Detection host (target) | OpenWrt 24.10+ LuCI + Telegram alerts *(deployment target)* |
 
 ---
