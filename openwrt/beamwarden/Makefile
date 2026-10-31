@@ -13,16 +13,18 @@ include $(INCLUDE_DIR)/package.mk
 define Package/beamwarden
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Beam-Warden beamforming-injection (BFI-storm) detector
+  TITLE:=Beam-Warden beamforming-attack detector (telemetry, adapter-free)
   URL:=https://beamwarden.coldcollectives.my
-  DEPENDS:=+tcpdump-mini +iw
+  DEPENDS:=+iw
   PKGARCH:=all
 endef
 
 define Package/beamwarden/description
-  Detects WiFi beamforming-feedback injection (BeamCraft-style) attacks on-device
-  by watching the on-air VHT compressed-BF frame rate and retry ratio. Self-
-  calibrates a per-network normal baseline; no python/sklearn/cloud needed.
+  Detects WiFi beamforming-feedback forgery (BeamCraft-style) attacks on-device
+  from the router's OWN `iw station dump` telemetry (tx-retry / PER spike when the
+  forged beam misdirects and the AP retransmits). Self-calibrates a per-network
+  baseline. No monitor mode, no capture adapter, no python/sklearn - runs on any
+  router `iw` runs on.
 endef
 
 # nothing to cross-compile - it is a shell detector + configs

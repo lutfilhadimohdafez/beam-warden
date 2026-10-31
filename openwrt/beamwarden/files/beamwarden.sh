@@ -1,96 +1,108 @@
 #!/bin/sh
-# beamwarden - standalone BFI-storm anomaly detector for OpenWrt.
+# beamwarden - adapter-free beamforming-attack detector for OpenWrt.
 #
-# Physics, not magic: a beamforming-injection attack (BeamCraft-style) sprays
-# FORGED VHT compressed-beamforming frames (802.11 mgmt Action-No-Ack, subtype
-# 0xe0, category 21) at the AP. That does two measurable things on air:
-#   1. the on-air BFI frame RATE for the victim client roughly DOUBLES, and
-#   2. ~half the forged frames carry the RETRY bit (re-injection), where normal
-#      sounding carries it ~never.
-# Validated offline against a real capture: tcpdump 'wlan[0]==0xe0 and wlan src
-# <mac>' counts exactly the same frames tshark's category_code==21 filter does
-# (1381 == 1381), and over a real heavy+bursty NORMAL capture the thresholds
-# below tripped 0/33 windows.
+# PORTABLE BY DESIGN: reads ONLY `iw dev <ap> station dump` - the per-client
+# telemetry every OpenWrt router already exposes. No monitor mode, no capture
+# adapter, no tcpdump, no python. Runs on any router `iw` runs on.
 #
-# This detector does NOT ship a fixed magic number. It CALIBRATES the normal BFI
-# envelope on the network it is deployed to, then alerts on a surge above that
-# learned ceiling or a retry-ratio spike. That is the answer to "does it work on
-# a network that isn't the lab" - it learns *your* normal first.
+# What it watches: a BeamCraft-style forged-BFI attack misdirects the AP's beam,
+# so the victim can't ACK -> the AP RETRANSMITS -> its own tx-retry / tx-fail
+# (PER) counters climb, MCS/throughput sag. Those are the station-dump fields.
 #
-# ponytail: one ash script, tcpdump for counting, logger for alerts. No python,
-#           no sklearn, no MQTT, no LuCI. Add those only if a demo needs them.
+# SELF-CALIBRATING: every network's normal is different (a quiet home != a busy
+# hall), so `calibrate` learns THIS network's baseline retry/PER once, and `watch`
+# alerts on a sustained spike ABOVE that baseline. Relative, not a hard-coded lab
+# number -> transfers to a network it never saw.
+#
+# HONEST LIMIT (see README): detection reads the attack's EFFECT on the link. When
+# the attack is fully covert (strong link, no degradation) the telemetry barely
+# moves and detection weakens. Catching the forged frames directly would fix that
+# but needs monitor mode, which many routers can't do - hence this telemetry path.
+#
+# ponytail: one ash script, iw + awk only. No ML runtime on the router; the
+#           RandomForest (tools/train_telemetry.py) is trained offline and its
+#           decision is distilled to the calibrated relative thresholds below.
 
 CONF=/etc/beamwarden.conf
 [ -f "$CONF" ] && . "$CONF"
 
-# --- defaults (overridable in /etc/beamwarden.conf) ------------------------
-AP_IF="${AP_IF:-wlan0}"        # the AP radio interface to tap
-MON="${MON:-bwmon0}"           # monitor vif this tool creates on AP_IF
-MAC="${MAC:-}"                 # client MAC to protect; empty = any client
-WIN="${WIN:-2}"                # window seconds (matches the trained pipeline)
+AP_IF="${AP_IF:-wlan0}"        # the AP interface to watch (e.g. phy1-ap0 / wlan0)
+MAC="${MAC:-}"                 # client MAC to protect; empty = aggregate all clients
+WIN="${WIN:-2}"               # seconds per detection window
 CAL_SECONDS="${CAL_SECONDS:-120}"
-MARGIN="${MARGIN:-40}"         # alert ceiling = normal_peak * (100+MARGIN)%
-RATIO_PCT="${RATIO_PCT:-25}"   # retry-ratio alert threshold, percent (normal~0, attack~50)
-DEFAULT_CEIL="${DEFAULT_CEIL:-24}"   # fallback ceiling if never calibrated
-STATE_CEIL=/var/run/beamwarden.ceil
-ALERT_HOOK=/etc/beamwarden/on_alert   # optional: your script, args: bfi ceil ratio%
-TMP=/tmp/bw_win.pcap
+RETRY_MULT="${RETRY_MULT:-1.5}"   # alert if retry_rate > baseline * this
+PER_MULT="${PER_MULT:-1.5}"       # alert if tx-PER    > baseline * this
+HITS_TO_ALARM="${HITS_TO_ALARM:-3}"  # consecutive bad windows before alerting (noise guard)
+STATE=/var/run/beamwarden.base
+ALERT_HOOK=/etc/beamwarden/on_alert   # optional: your script, args: retry_rate per_rate
 
 log() { logger -t beamwarden "$@"; }
 
-ensure_mon() {
-	iw dev "$MON" info >/dev/null 2>&1 && return 0
-	iw dev "$AP_IF" interface add "$MON" type monitor >/dev/null 2>&1
-	ip link set "$MON" up >/dev/null 2>&1
-	iw dev "$MON" info >/dev/null 2>&1
+# aggregate tx retries/packets/failed (and mean signal) across the target station(s)
+# prints: "<retries> <packets> <failed>"
+counters() {
+	iw dev "$AP_IF" station dump 2>/dev/null | awk -v mac="$MAC" '
+		/^Station/ { s=$2; want=(mac=="" || s==mac) }
+		want && /tx retries:/ { r+=$3 }
+		want && /tx packets:/ { p+=$3 }
+		want && /tx failed:/  { f+=$3 }
+		END { printf "%d %d %d\n", r, p, f }'
 }
 
-# capture one WIN-second window, print "<bfi_count> <retry_bfi_count>"
-count_window() {
-	local filt="wlan[0]==0xe0"
-	[ -n "$MAC" ] && filt="$filt and wlan src $MAC"
-	timeout "$WIN" tcpdump -i "$MON" -nn -w "$TMP" "$filt" >/dev/null 2>&1
-	local b r
-	b=$(tcpdump -r "$TMP" -nn 2>/dev/null | grep -c .)
-	r=$(tcpdump -r "$TMP" -nn "wlan[1]&0x8!=0" 2>/dev/null | grep -c .)
-	rm -f "$TMP"
-	echo "${b:-0} ${r:-0}"
+# one window: print "<retry_rate> <per_rate>" (fraction 0..1) over WIN seconds
+sample() {
+	set -- $(counters); local r1=$1 p1=$2 f1=$3
+	sleep "$WIN"
+	set -- $(counters); local r2=$1 p2=$2 f2=$3
+	awk -v dr=$((r2-r1)) -v dp=$((p2-p1)) -v df=$((f2-f1)) 'BEGIN{
+		tot=dp+dr; if(tot<1)tot=1;
+		sent=dp+df; if(sent<1)sent=1;
+		printf "%.4f %.4f\n", dr/tot, df/sent }'
 }
 
 cmd_calibrate() {
-	ensure_mon || { echo "cannot create monitor vif $MON on $AP_IF"; exit 1; }
-	echo "calibrating ${CAL_SECONDS}s of NORMAL traffic on $MON (mac=${MAC:-any})..."
-	echo "run your usual load now (browsing/streaming/download). do NOT attack."
-	local n=$((CAL_SECONDS / WIN)) i=0 maxb=0
+	echo "calibrating ${CAL_SECONDS}s of NORMAL traffic on $AP_IF (mac=${MAC:-all})..."
+	echo "use the network normally now; do NOT run the attack."
+	local n=$((CAL_SECONDS / WIN)) i=0 rsum=0 psum=0
 	while [ $i -lt $n ]; do
-		set -- $(count_window); [ "$1" -gt "$maxb" ] && maxb=$1
-		i=$((i+1))
+		set -- $(sample); rsum=$(awk -v a=$rsum -v b=$1 'BEGIN{print a+b}')
+		psum=$(awk -v a=$psum -v b=$2 'BEGIN{print a+b}'); i=$((i+1))
 	done
-	local ceil=$(( maxb * (100 + MARGIN) / 100 ))
-	[ $ceil -lt $((maxb + 6)) ] && ceil=$((maxb + 6))
-	echo "$ceil" > "$STATE_CEIL"
-	log "calibrated: normal peak=${maxb}/${WIN}s -> alert ceiling=${ceil}, retry>${RATIO_PCT}%"
-	echo "baseline learned: normal peak ${maxb} BFI/${WIN}s  ->  alert ceiling ${ceil}"
+	local rb=$(awk -v s=$rsum -v n=$n 'BEGIN{printf "%.4f", (n?s/n:0)}')
+	local pb=$(awk -v s=$psum -v n=$n 'BEGIN{printf "%.4f", (n?s/n:0)}')
+	echo "$rb $pb" > "$STATE"
+	log "calibrated baseline retry=$rb per=$pb (alert at x$RETRY_MULT / x$PER_MULT)"
+	echo "baseline learned: retry=$rb  per=$pb  -> alerts above x$RETRY_MULT"
 }
 
 cmd_watch() {
-	ensure_mon || { log "cannot create monitor vif $MON on $AP_IF"; exit 1; }
-	local ceil; ceil=$(cat "$STATE_CEIL" 2>/dev/null || echo "$DEFAULT_CEIL")
-	log "watching $MON: ceiling=${ceil} BFI/${WIN}s, retry>${RATIO_PCT}%, mac=${MAC:-any}"
+	local rb pb
+	read rb pb < "$STATE" 2>/dev/null || { rb=0.05; pb=0.02; log "no baseline - run 'beamwarden calibrate'; using weak defaults"; }
+	local rth=$(awk -v b=$rb -v m=$RETRY_MULT 'BEGIN{printf "%.4f", b*m}')
+	local pth=$(awk -v b=$pb -v m=$PER_MULT 'BEGIN{printf "%.4f", b*m}')
+	log "watching $AP_IF: retry>$rth or per>$pth (baseline retry=$rb per=$pb), mac=${MAC:-all}"
+	local hits=0
 	while :; do
-		set -- $(count_window); local b=$1 r=$2 ratio=0
-		[ "$b" -gt 0 ] && ratio=$(( r * 100 / b ))
-		if [ "$b" -gt "$ceil" ] || [ "$ratio" -gt "$RATIO_PCT" ]; then
-			log "ALERT beamforming-injection: ${b} BFI/${WIN}s (ceil ${ceil}), retry ${ratio}% (th ${RATIO_PCT}%), src=${MAC:-any}"
-			[ -x "$ALERT_HOOK" ] && "$ALERT_HOOK" "$b" "$ceil" "$ratio" &
+		set -- $(sample); local r=$1 p=$2
+		local bad=$(awk -v r=$r -v p=$p -v rt=$rth -v pt=$pth 'BEGIN{print (r>rt||p>pt)?1:0}')
+		if [ "$bad" = "1" ]; then
+			hits=$((hits+1))
+			if [ $hits -ge $HITS_TO_ALARM ]; then
+				log "ALERT beamforming-attack: retry=$r (th $rth) per=$p (th $pth) mac=${MAC:-all}"
+				[ -x "$ALERT_HOOK" ] && "$ALERT_HOOK" "$r" "$p" &
+				hits=0
+			fi
+		else
+			hits=0
 		fi
 	done
 }
 
 cmd_status() {
-	echo "AP_IF=$AP_IF MON=$MON mac=${MAC:-any} win=${WIN}s"
-	echo "ceiling=$(cat "$STATE_CEIL" 2>/dev/null || echo "$DEFAULT_CEIL (uncalibrated)") retry_th=${RATIO_PCT}%"
-	iw dev "$MON" info >/dev/null 2>&1 && echo "monitor $MON: UP" || echo "monitor $MON: DOWN"
+	echo "AP_IF=$AP_IF mac=${MAC:-all} win=${WIN}s"
+	if read rb pb < "$STATE" 2>/dev/null; then echo "baseline: retry=$rb per=$pb (x$RETRY_MULT/x$PER_MULT)"
+	else echo "baseline: UNCALIBRATED - run 'beamwarden calibrate'"; fi
+	set -- $(sample); echo "now: retry=$1 per=$2"
 }
 
 case "$1" in
