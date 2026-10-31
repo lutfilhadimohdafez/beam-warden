@@ -48,7 +48,7 @@ def run_level(mbm):
     time.sleep(2)
     LOG.parent.mkdir(parents=True, exist_ok=True)
     # tee: user sees it live AND we parse the verdict afterwards
-    subprocess.run(f"{PY} {OBJ1} 2>&1 | tee {LOG}", shell=True)
+    subprocess.run(f"{PY} {OBJ1} --no-phone-start 2>&1 | tee {LOG}", shell=True)
     txt = LOG.read_text(errors="ignore") if LOG.exists() else ""
     m = re.search(r"throughput drop:\s*([\-\d.]+)%", txt)
     inj = re.search(r"injections total:\s*(\d+)", txt)

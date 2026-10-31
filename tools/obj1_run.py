@@ -150,6 +150,9 @@ def main():
     p.add_argument("--gap", type=float, default=0.6, help="idle gap (forces AP re-sound)")
     p.add_argument("--alpha", type=float, default=1.0)
     p.add_argument("--out", default=None)
+    p.add_argument("--no-phone-start", action="store_true",
+                   help="don't (re)start iperf3 over the phone's wedged SSH; "
+                        "assume the server is already running (e.g. started via adb)")
     p.add_argument("--selftest", action="store_true",
                    help="run the pure-logic self-check and exit (no hardware)")
     a = p.parse_args()
@@ -174,8 +177,9 @@ def main():
                  f"{a.phone_user}@{a.victim_ip}")
 
     phy = monitor_up(a.mon, a.channel)
-    sh(f"{phone_ssh} 'pkill iperf3 2>/dev/null; termux-wake-lock; "
-       f"nohup iperf3 -s -p {a.port} >/dev/null 2>&1 &'")
+    if not a.no_phone_start:
+        sh(f"{phone_ssh} 'pkill iperf3 2>/dev/null; termux-wake-lock; "
+           f"nohup iperf3 -s -p {a.port} >/dev/null 2>&1 &'")
     time.sleep(2)
 
     base_tput = []
