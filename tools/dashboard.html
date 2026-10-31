@@ -1801,6 +1801,10 @@
   <!-- ======== LEARNING TAB ======== -->
   <div class="tab-section" id="tab-learning">
 
+    <div class="stagger" style="margin-bottom:14px;padding:10px 14px;border-left:3px solid var(--accent);background:var(--panel-2);border-radius:4px;font-family:var(--font-mono);font-size:0.68rem;color:var(--muted);line-height:1.55;">
+      <b style="color:var(--accent);">How this maps to the shipped detector.</b> This guided calibration is the <b>lab demo</b> (on-air BFI signal, needs the Alfa monitor). The <b>deployed</b> detector uses the <em>same idea</em> &mdash; learn this network's normal, then flag the deviation &mdash; but on the router's <b>own telemetry</b> (tx-retry / PER from <code>iw station dump</code>), so it needs <b>no adapter</b> and runs on any OpenWrt router: <code>beamwarden calibrate</code> then <code>beamwarden watch</code>, with alerts pushed to <b>Telegram</b>. Details on the <a href="/ml" style="color:var(--accent);">ML Engine</a> page.
+    </div>
+
     <div class="learn-help stagger" style="margin-bottom:18px;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:0 14px;">
       <button type="button" id="learnHelpOpen" style="cursor:pointer;padding:12px 0;font-family:var(--font-mono);font-size:0.72rem;font-weight:700;letter-spacing:0.04em;color:var(--accent);background:none;border:none;width:100%;text-align:left;">
         &#9432; HOW TO USE THE LEARNING TAB <span style="color:var(--muted-dim);font-weight:400;">(click to expand)</span>
