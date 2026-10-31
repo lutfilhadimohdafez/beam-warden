@@ -1561,27 +1561,27 @@
     <div class="dash-center">
       <div class="bfid-panel offline stagger" id="bfidPanel">
         <div class="bfid-statuswrap">
-          <div class="bfid-eyebrow">BFI-Storm Attack Detection</div>
+          <div class="bfid-eyebrow">Beamforming Attack Detection &middot; ML engine</div>
           <div class="bfid-status offline" id="bfidStatus">STANDBY</div>
         </div>
         <div class="bfid-readouts">
           <div class="bfid-ro">
             <span class="bfid-ro-val" id="bfidRate">&mdash;</span>
-            <span class="bfid-ro-lbl">BFI frames / sec</span>
+            <span class="bfid-ro-lbl">retry rate</span>
           </div>
           <div class="bfid-ro">
             <span class="bfid-ro-val" id="bfidRetry">&mdash;</span>
-            <span class="bfid-ro-lbl">RETRY=1 forgery count</span>
+            <span class="bfid-ro-lbl">throughput (Mbps)</span>
           </div>
           <div class="bfid-ro">
             <span class="bfid-ro-val" id="bfidScore">&mdash;</span>
-            <span class="bfid-ro-lbl">ML score (0&ndash;1)</span>
+            <span class="bfid-ro-lbl">tx-PER</span>
             <span class="bfid-meter"><span class="bfid-meter-fill" id="bfidMeter"></span></span>
           </div>
         </div>
         <div class="bfid-spark">
           <canvas id="bfidSpark" width="440" height="64"></canvas>
-          <div class="bfid-spark-cap">BFI rate &middot; last 60s</div>
+          <div class="bfid-spark-cap">retry rate &middot; last 60s</div>
         </div>
       </div>
       <div class="section-label stagger">TELEMETRY <span class="section-hint" id="telemetryHint"></span></div>
@@ -2527,6 +2527,30 @@
   }
 
   /* ---- Handle telemetry sample ---- */
+  function setTeleVerdict(d) {
+    var v = d.detect_verdict;
+    if (v === undefined) return;               // not a live-telemetry message
+    if (v === null) {                          // model/baseline not ready
+      $bfidPanel.className = "bfid-panel stagger offline";
+      $bfidStatus.className = "bfid-status offline"; $bfidStatus.textContent = "STANDBY";
+    } else if (v === "idle") {
+      $bfidPanel.className = "bfid-panel stagger offline";
+      $bfidStatus.className = "bfid-status offline"; $bfidStatus.textContent = "IDLE";
+    } else {
+      var attack = v === "attack";
+      $bfidPanel.className = "bfid-panel stagger " + (attack ? "attack" : "normal");
+      $bfidStatus.className = "bfid-status " + (attack ? "attack" : "normal");
+      $bfidStatus.textContent = attack ? "ATTACK" : "NORMAL";
+    }
+    $bfidRate.textContent  = fx(d.retry_rate, 3);
+    $bfidRetry.textContent = fxTput(d.throughput_tx_mbps);
+    $bfidScore.textContent = fx(d.tx_per_pct, 2);
+    if (typeof d.retry_rate === "number" && !isNaN(d.retry_rate)) {
+      bfidSpark.push(d.retry_rate); if (bfidSpark.length > 60) bfidSpark.shift();
+    }
+    drawBfidSpark();
+  }
+
   function handleMessage(d) {
     /* Route by type: log/status → Mission Control, meta/telemetry → existing */
     if (d.mode) { runningMode = d.mode; }
@@ -2617,6 +2641,8 @@
     }
     var _hint = document.getElementById("telemetryHint");
     if (_hint) _hint.textContent = _na ? ("\u00B7 " + _na + " unavailable on this hardware") : "";
+
+    setTeleVerdict(d);   /* drive the detector panel from the telemetry ML verdict */
 
     setMode(d.mode);
 

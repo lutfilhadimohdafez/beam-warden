@@ -305,6 +305,43 @@ async def _replay_broadcast_current() -> None:
 
 
 # ── producer: live mode ───────────────────────────────────────────────────
+_RIG_BASELINE: list | None = None
+_MODEL_AWK = Path(__file__).resolve().parent.parent / "openwrt" / "beamwarden" / "files" / "model.awk"
+
+
+def _telemetry_verdict(retry, per, tput, rssi_list, ont):
+    """Run the SHIPPED ML forest (model.awk) on live telemetry vs the router's
+    calibrated baseline -> 'attack' / 'normal' / 'idle' / None. Same engine the
+    router runs; the dashboard just mirrors the verdict on the detector panel."""
+    global _RIG_BASELINE
+    if not _MODEL_AWK.exists():
+        return None
+    if _RIG_BASELINE is None:
+        try:
+            parts = ont.run("cat /var/run/beamwarden.base 2>/dev/null").split()
+            _RIG_BASELINE = [float(x) for x in parts[:8]] if len(parts) >= 8 else []
+        except Exception:
+            return None
+    if not _RIG_BASELINE:
+        return None
+    retry, per, tput = retry or 0.0, per or 0.0, tput or 0.0
+    if tput < 1.0 and retry < 0.05:           # activity gate: idle link = nothing to attack
+        return "idle"
+    rssi = [v for v in rssi_list if v is not None]
+    rssi = (sum(rssi) / len(rssi)) if rssi else -60.0
+    rm, rsd, pm, psd, tm, tsd, rsm, rssd = _RIG_BASELINE
+    e = 1e-6
+    feats = [retry / (rm + e), (retry - rm) / (rsd + e), per / (pm + e), (per - pm) / (psd + e),
+             tput / (tm + e), (tput - tm) / (tsd + e), rssi / (rsm + e), (rssi - rsm) / (rssd + e)]
+    try:
+        r = subprocess.run(["awk", "-f", str(_MODEL_AWK)],
+                           input=" ".join(f"{v:.6g}" for v in feats) + "\n",
+                           capture_output=True, text=True, timeout=3)
+        return "attack" if r.stdout.strip() == "1" else "normal"
+    except Exception:
+        return None
+
+
 async def _producer_live() -> None:
     ont = None
     prev: dict | None = None
@@ -389,6 +426,12 @@ async def _producer_live() -> None:
             score, is_anom = score_sample(msg)
             msg["anomaly_score"] = score
             msg["is_anomaly"] = is_anom
+            # telemetry ML verdict (the shipped forest) -> detector panel
+            msg["detect_verdict"] = _telemetry_verdict(
+                deltas.get("retry_rate", 0.0), parsed.get("tx_per_pct", 0.0),
+                deltas.get("throughput_tx_mbps", 0.0),
+                [parsed.get("rssi0"), parsed.get("rssi1"), parsed.get("rssi2"), parsed.get("rssi3")],
+                ont)
             await _broadcast(msg)
 
             prev = parsed
