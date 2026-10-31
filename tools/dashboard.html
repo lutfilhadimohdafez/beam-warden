@@ -502,6 +502,47 @@
     color: var(--muted-dim); text-transform: uppercase; font-variant-caps: all-small-caps;
     text-align: right;
   }
+  /* Learning tab — simple guided BFI-storm calibration */
+  .learn-places { display: flex; gap: 12px; flex-wrap: wrap; }
+  .learn-place {
+    flex: 1; min-width: 120px; padding: 18px 12px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 1rem; font-weight: 700;
+    color: var(--text); background: var(--panel-2);
+    border: 2px solid var(--border); border-radius: 6px;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+  .learn-place:hover { border-color: var(--accent); }
+  .learn-place.active { border-color: var(--ok); color: var(--ok); background: var(--accent-dim); }
+  .learn-big-btn {
+    width: 100%; padding: 22px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; letter-spacing: 0.02em;
+    color: #06121a; background: var(--ok); border: none; border-radius: 6px;
+    transition: opacity 0.2s, background 0.2s;
+  }
+  .learn-big-btn:hover { opacity: 0.9; }
+  .learn-big-btn:disabled { opacity: 0.45; cursor: default; }
+  .learn-prog-wrap { margin-top: 14px; }
+  .learn-prog-track { background: var(--border); height: 10px; border-radius: 5px; overflow: hidden; }
+  .learn-prog-fill { background: var(--ok); height: 100%; width: 0%; transition: width 0.3s; }
+  .learn-prog-lbl { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); margin-top: 6px; }
+  .learn-done { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ok); margin-top: 12px; font-weight: 700; min-height: 18px; }
+  .learn-verdict {
+    font-family: var(--font-mono); font-size: 2rem; font-weight: 800; letter-spacing: 0.04em;
+    text-align: center; padding: 22px; border-radius: 6px; border: 2px solid var(--border);
+  }
+  .learn-verdict.standby { color: var(--muted); border-color: var(--border); }
+  .learn-verdict.normal  { color: var(--ok); border-color: var(--ok); background: var(--accent-dim); }
+  .learn-verdict.attack  { color: var(--danger); border-color: var(--danger); animation: pulse-text 1s ease-in-out infinite; }
+  .learn-verdict-sub { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted-dim); text-align: center; margin-top: 10px; }
+  .learn-details { margin-top: 18px; }
+  .learn-details summary {
+    cursor: pointer; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.04em; color: var(--accent); padding: 8px 0;
+  }
+  .learn-details-body {
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+    display: flex; flex-direction: column; gap: 6px; padding: 10px 2px;
+  }
 
   /* ---- SECTION LABEL ---- */
   .section-label {
@@ -1161,6 +1202,13 @@
     .dash-center .detect-panel { flex-shrink: 0; margin-bottom: 0; }
     .dash-center .section-label { flex-shrink: 0; margin-bottom: 0; }
     .dash-center .tiles { flex-shrink: 0; margin-bottom: 0; }
+    /* the center column is narrow (~1/3 width): let the 6 telemetry tiles WRAP to
+       fill it instead of squeezing into 6 thin columns that underflow. */
+    .dash-center .tiles { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+    /* keep the stacked sections from being stretched or collapsed by the flex column */
+    .dash-center .bfid-panel { flex-shrink: 0; margin-bottom: 0; }
+    .dash-center .clients-list { flex-shrink: 0; }
+    .dash-center #bfiPanel { flex-shrink: 0; }
   }
 
   /* ---- ROUTER FEED FLOATING PANEL ---- */
@@ -1533,10 +1581,10 @@
         </div>
       </div>
       <div class="detect-panel stagger">
-        <div class="detect-status offline" id="detectStatus">DETECTOR OFFLINE</div>
+        <div class="detect-status offline" id="detectStatus">STANDBY</div>
         <div class="detect-score-wrap">
           <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
-          <div class="detect-score-caption">ISOLATION FOREST SCORE<br>&gt;0 NORMAL &middot; &lt;0 ANOMALY</div>
+          <div class="detect-score-caption">VICTIM BFI FRAMES / SEC<br>A SPIKE = FORGED-FEEDBACK ATTACK</div>
         </div>
       </div>
       <div class="section-label stagger">TELEMETRY</div>
@@ -1562,9 +1610,9 @@
           <div class="tile-value" id="valMcs">-</div>
           <div class="tile-sub" id="valMcsSub"></div>
         </div>
-        <div class="tile">
+        <div class="tile" id="tileTemp">
           <div class="tile-label">Temp</div>
-          <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit">&deg;C</span></div>
+          <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit" id="valTempUnit">&deg;C</span></div>
         </div>
       </div>
       <div class="section-label stagger" id="clientsLabel">CLIENTS CONNECTED &middot; <span id="clientsCount">0</span></div>
@@ -1618,7 +1666,7 @@
         <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
       </div>
       <div class="chart-card">
-        <div class="chart-title">Anomaly Score</div>
+        <div class="chart-title">BFI Rate (frames/s)</div>
         <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
       </div>
     </div>
@@ -1729,146 +1777,56 @@
       </button>
     </div>
 
-    <div class="section-label stagger">MODEL STATUS</div>
-    <div class="mc-section stagger" id="learnModelCard">
+    <!-- STEP 1 -->
+    <div class="section-label stagger">&#9312; WHERE AM I?</div>
+    <div class="mc-section stagger">
       <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:12px;">
-        Trained on a busy link; recalibrate to teach it THIS environment's normal.
+        Pick where this Wi-Fi lives. Each place remembers its own &ldquo;normal&rdquo; so a busy office and a quiet home don&rsquo;t get mixed up.
       </div>
-      <div class="mc-params" id="learnModelParams">
-        <div class="mc-param">
-          <label>Model Loaded</label>
-          <input id="learnModelLoaded" value="—" readonly style="width:80px;">
-        </div>
-        <div class="mc-param">
-          <label>Features</label>
-          <input id="learnFeatures" value="—" readonly style="width:220px;">
-        </div>
-        <div class="mc-param">
-          <label>Training Samples</label>
-          <input id="learnSamples" value="—" readonly style="width:100px;">
-        </div>
-        <div class="mc-param">
-          <label>Contamination</label>
-          <input id="learnContamination" value="—" readonly style="width:80px;">
-        </div>
+      <div class="learn-places" id="learnPlaces">
+        <button type="button" class="learn-place" data-place="home">&#127968; Home</button>
+        <button type="button" class="learn-place" data-place="event">&#127881; Event</button>
+        <button type="button" class="learn-place" data-place="office">&#127970; Office</button>
       </div>
     </div>
 
-    <div class="section-label stagger">LEARNED NORMAL PROFILE</div>
+    <!-- STEP 2 -->
+    <div class="section-label stagger">&#9313; TEACH IT WHAT&rsquo;S NORMAL HERE</div>
     <div class="mc-section stagger">
-      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:12px;">
-        This is what the model thinks "normal" looks like (per-feature mean, min–max).
+      <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:14px;">
+        With the attack <b>OFF</b> and the Wi-Fi in normal use, press this once. It listens for a few seconds and remembers how often this network normally sends beam-steering feedback on air.
       </div>
-      <div style="overflow-x:auto;">
-        <table id="learnProfileTable" style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:0.72rem;">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border);">
-              <th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:600;">Feature</th>
-              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Mean</th>
-              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Min</th>
-              <th style="text-align:right;padding:6px 10px;color:var(--muted);font-weight:600;">Max</th>
-              <th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:600;width:40%;">Range</th>
-            </tr>
-          </thead>
-          <tbody id="learnProfileBody"></tbody>
-        </table>
+      <button type="button" class="learn-big-btn" id="learnStartBtn">&#9655;&nbsp; Learn my normal Wi-Fi</button>
+      <div class="learn-prog-wrap" id="learnProgWrap" style="display:none;">
+        <div class="learn-prog-track"><div class="learn-prog-fill" id="learnProgFill"></div></div>
+        <div class="learn-prog-lbl" id="learnProgLbl">Listening&hellip;</div>
       </div>
+      <div class="learn-done" id="learnDone"></div>
     </div>
 
-    <div class="section-label stagger">CALIBRATION</div>
+    <!-- STEP 3 -->
+    <div class="section-label stagger">LIVE CHECK</div>
     <div class="mc-section stagger">
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:200px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);" id="learnCalibLabel">0 / 150 normal samples (~2s each)</span>
-            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);" id="learnCalibAuto">auto: off</span>
-          </div>
-          <div style="background:var(--border);height:8px;position:relative;">
-            <div id="learnCalibBar" style="background:var(--ok);height:100%;width:0%;transition:width 0.3s;"></div>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <div class="mc-param" style="margin:0;">
-            <label>Capture Duration (hours)</label>
-            <input id="learnCalibTargetN" type="number" value="1" min="0.02" max="48" step="0.25" style="width:90px;">
-            <span id="learnCalibEstimate" style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);margin-top:2px;"></span>
-          </div>
-          <div style="display:flex;gap:4px;align-items:flex-end;">
-            <button class="mc-btn" data-calib-hours="0.25" style="padding:6px 8px;font-size:0.56rem;">15m</button>
-            <button class="mc-btn" data-calib-hours="1" style="padding:6px 8px;font-size:0.56rem;">1h</button>
-            <button class="mc-btn" data-calib-hours="4" style="padding:6px 8px;font-size:0.56rem;">4h</button>
-            <button class="mc-btn" data-calib-hours="8" style="padding:6px 8px;font-size:0.56rem;">8h</button>
-            <button class="mc-btn" data-calib-hours="24" style="padding:6px 8px;font-size:0.56rem;">24h</button>
-          </div>
-          <button class="mc-btn run" id="learnCaptureBtn">Capture Current</button>
-          <button class="mc-btn" id="learnAutoBtn">Auto-capture: OFF</button>
-          <button class="mc-btn" id="learnRetrainBtn" disabled>Retrain</button>
-          <button class="mc-btn stop" id="learnResetBtn">Reset</button>
-        </div>
-      </div>
-      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-        <div class="mc-param" style="margin:0;">
-          <label>Profile Name</label>
-          <input id="learnProfileName" type="text" value="default" maxlength="64" style="width:150px;" placeholder="default">
-        </div>
-        <button class="mc-btn" data-profile-name="idle" style="padding:6px 8px;font-size:0.56rem;">idle</button>
-        <button class="mc-btn" data-profile-name="youtube" style="padding:6px 8px;font-size:0.56rem;">youtube</button>
-        <button class="mc-btn" data-profile-name="iperf" style="padding:6px 8px;font-size:0.56rem;">iperf</button>
-        <button class="mc-btn" data-profile-name="triple-play" style="padding:6px 8px;font-size:0.56rem;">triple-play</button>
-      </div>
-      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);margin-bottom:6px;">
-        TRAIN ON (checked profiles only &mdash; none checked = all):
-      </div>
-      <div id="learnProfileList" style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:0.68rem;color:var(--muted);min-height:18px;"></div>
-      <div id="learnTrainResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-top:8px;"></div>
+      <div class="learn-verdict standby" id="learnVerdict">LEARN FIRST</div>
+      <div class="learn-verdict-sub" id="learnVerdictSub">Teach a place above, then this turns green for NORMAL and red for ATTACK.</div>
     </div>
 
-    <div class="section-label stagger">SWITCHABLE BASELINES</div>
-    <div class="mc-section stagger">
-      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:10px;">
-        Each situation is its own baseline model. Capture samples under a profile name
-        (e.g. <em>my-home</em>, <em>events-20pax</em>), train it, then <b>Activate</b> the one
-        that matches where you are — the detector switches to that normal.
-      </div>
-      <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-bottom:12px;">
-        Active baseline: <span id="learnActiveBaseline" style="color:var(--ok);font-weight:700;">—</span>
-      </div>
-      <div id="learnBaselineList" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);">Loading&hellip;</div>
-      <div id="learnBaselineResult" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-top:8px;"></div>
-    </div>
-
-    <div class="section-label stagger">LIVE MATCH METER</div>
-    <div class="mc-section stagger">
-      <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);margin-bottom:10px;">
-        Rolling match rate: how well current traffic matches the learned normal (last 60 samples).
-      </div>
-      <div style="display:flex;align-items:center;gap:16px;">
-        <div style="flex:1;">
-          <div style="background:var(--border);height:14px;position:relative;">
-            <div id="learnMatchBar" style="background:var(--ok);height:100%;width:50%;transition:width 0.3s;"></div>
-          </div>
+    <!-- ADVANCED -->
+    <details class="learn-details stagger">
+      <summary>Show details</summary>
+      <div class="learn-details-body">
+        <div>Place: <b id="learnDetPlace">home</b></div>
+        <div>Live BFI rate: <b id="learnDetRate">&mdash;</b> frames/sec</div>
+        <div>RETRY=1 forgeries this window: <b id="learnDetRetry">&mdash;</b></div>
+        <div>Learned normal ceiling: <b id="learnDetNormal">&mdash;</b> frames/sec</div>
+        <div>Alarm threshold: <b id="learnDetThresh">&mdash;</b> frames/sec</div>
+        <div>Learned from <b id="learnDetSamples">0</b> windows <span id="learnDetTs" style="color:var(--muted-dim);"></span></div>
+        <button type="button" class="mc-btn stop" id="learnForget" style="margin-top:10px;padding:5px 12px;font-size:0.6rem;">Forget this place</button>
+        <div style="margin-top:10px;color:var(--muted-dim);line-height:1.5;">
+          How it works: the attack injects forged beam-steering feedback pretending to be your phone, so the victim&rsquo;s feedback frames roughly <b>double</b> on air (and carry the RETRY=1 marker). We learn this network&rsquo;s normal rate, then flag any 2-second window that spikes above it. No model files, no training &mdash; just this network&rsquo;s own baseline.
         </div>
-        <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-bright);min-width:60px;text-align:right;" id="learnMatchVal">—</div>
       </div>
-      <div style="display:flex;justify-content:space-between;margin-top:6px;">
-        <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);">haywire</span>
-        <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--muted-dim);">calibrated</span>
-      </div>
-      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted-dim);margin-top:8px;">
-        Anomaly rate: <span id="learnAnomalyRate">—</span> &middot; Samples in window: <span id="learnAnomalyWindow">0</span>
-      </div>
-    </div>
-
-    <div class="section-label stagger">TRAINING HISTORY</div>
-    <div class="mc-section stagger">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
-        <span style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted-dim);">
-          Click a row to inspect what the model learned on. Hover a row for its &times; delete.
-        </span>
-        <button class="mc-btn stop" id="learnHistoryClear" style="padding:5px 12px;font-size:0.6rem;">Clear All</button>
-      </div>
-      <div id="learnHistoryList" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);">Loading&hellip;</div>
-    </div>
+    </details>
 
   </div><!-- /tab-learning -->
 
@@ -1926,15 +1884,13 @@
     <button type="button" class="help-close" id="learnHelpClose" aria-label="Close">&times;</button>
     <div class="modal-title" id="learnHelpTitle">&#9432; HOW TO USE THE LEARNING TAB</div>
     <div class="help-body">
-      The detector learns what <b>normal</b> Wi-Fi looks like <i>here</i>, then flags the attack as an anomaly. Workflow:
+      The detector catches the attack by its <b>on-air noise</b>: the beam-spoof injects forged feedback frames pretending to be your phone, so those frames roughly double on air. You just teach it this network&rsquo;s normal rate first. Three steps:
       <ol style="margin:10px 0 0;padding-left:20px;break-inside:avoid;">
-        <li><b>Name the situation</b> &mdash; type a Profile Name (e.g. <code>my-home</code>, <code>events-20pax</code>) or tap a preset. This labels what you capture.</li>
-        <li><b>Capture normal traffic</b> &mdash; with the attack <b>OFF</b> and the link in its usual use (idle / YouTube / iperf), hit <b>Capture Current</b> for one-shot, or <b>Auto-capture</b> to log every ~2 s until the target is hit. Aim for &ge;30 samples.</li>
-        <li><b>Train a baseline</b> &mdash; in <b>Switchable Baselines</b>, click <b>Train</b> on that profile. It builds its own model and activates it.</li>
-        <li><b>Switch rooms?</b> Capture + train another profile, then <b>Activate</b> whichever matches where you are. <b>Rename</b> anytime.</li>
-        <li><b>Watch the Live Match Meter</b> &mdash; 100 % = traffic matches the learned normal. It dives when the beam-spoof attack poisons the link.</li>
+        <li><b>Where am I?</b> &mdash; tap <b>Home</b>, <b>Event</b>, or <b>Office</b>. Each place keeps its own normal, so you only learn once per place.</li>
+        <li><b>Learn my normal Wi-Fi</b> &mdash; with the attack <b>OFF</b> and the Wi-Fi in its usual use, press the big button once. It listens for a few seconds and remembers the normal feedback rate.</li>
+        <li><b>Live Check</b> &mdash; after that it just shows <b style="color:var(--ok);">NORMAL</b> (green) or <b style="color:var(--danger);">ATTACK</b> (red). Red means the feedback rate spiked above this place&rsquo;s normal.</li>
       </ol>
-      <div style="margin-top:10px;color:var(--muted-dim);">Tip: &ldquo;Retrain&rdquo; up top blends all checked profiles into one model; a <b>baseline</b> is one profile = one switchable model. Training History logs every run (deletable).</div>
+      <div style="margin-top:10px;color:var(--muted-dim);">Needs the live BFI feed running (BFI-Storm panel active). &ldquo;Show details&rdquo; reveals the raw frames/sec and the learned threshold.</div>
     </div>
   </div>
 </div>
@@ -1996,10 +1952,16 @@
   function renderClients(list) {
     if (!$clientsList || !$clientsCount) return;
     $clientsCount.textContent = list.length;
+    /* empty -> hide the whole section (label + list) so it doesn't leave an
+       underflowing block; rig-agnostic (driven by list length, not profile). */
+    var $clientsLabel = document.getElementById("clientsLabel");
     if (!list.length) {
-      $clientsList.innerHTML = '<div class="clients-empty">no clients (live mode only)</div>';
+      $clientsList.style.display = "none";
+      if ($clientsLabel) $clientsLabel.style.display = "none";
       return;
     }
+    $clientsList.style.display = "";
+    if ($clientsLabel) $clientsLabel.style.display = "";
     $clientsList.innerHTML = list.map(function (c) {
       return '<div class="clients-row"><span class="cmac">' + c.mac +
         '</span><span class="cdev">' + deviceLabel(c.mac) +
@@ -2334,20 +2296,17 @@
     type: "line",
     data: { labels: [], datasets: [
       {
-        label: "Anomaly Score",
+        label: "BFI frames/s",
         data: [],
         borderColor: "#3dd680",
         backgroundColor: "rgba(61,214,128,0.1)",
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.2,
-        fill: false,
-        segment: {
-          borderColor: function (ctx) { return ctx.p1.parsed.y < 0 ? "#f04848" : "#3dd680"; }
-        }
+        fill: false
       },
       {
-        label: "Threshold (0)",
+        label: "Learned normal ceiling",
         data: [],
         borderColor: "rgba(255,255,255,0.15)",
         borderWidth: 1,
@@ -2448,6 +2407,13 @@
     return (v === null || v === undefined || (typeof v === "number" && isNaN(v)))
       ? "—" : v.toFixed(n);
   }
+  /* throughput tile: adaptive precision so small idle-link values (e.g. 0.016
+     Mbps) don't round to 0.0 and desync from the chart, which plots the raw value. */
+  function fxTput(v) {
+    if (v === null || v === undefined || (typeof v === "number" && isNaN(v))) return "—";
+    var a = Math.abs(v);
+    return v.toFixed(a >= 10 ? 1 : a >= 1 ? 2 : 3);
+  }
 
   /* ---- BFI-storm attack detection (bfi_detect stream) ---- */
   var bfidSpark = [];           // rolling bfi_rate, ~60 samples (1/s)
@@ -2496,6 +2462,20 @@
       if (bfidSpark.length > 60) bfidSpark.shift();
     }
     drawBfidSpark();
+    /* plain-language mirror in the top detect panel (BFI-driven, not the old model) */
+    $detectStatus.className = "detect-status " + (attack ? "attack" : "normal");
+    $detectStatus.textContent = attack ? "ATTACK DETECTED" : "NORMAL";
+    $detectScoreVal.textContent = fx(d.bfi_rate, 1);
+    /* feed the repurposed right-column chart with the real live BFI rate */
+    if (chartAnomaly && typeof d.bfi_rate === "number" && !isNaN(d.bfi_rate)) {
+      rollingPush(chartAnomaly.data.labels, new Date().toLocaleTimeString());
+      rollingPush(chartAnomaly.data.datasets[0].data, d.bfi_rate);
+      var _lb = (typeof learnCurrent === "function" && learnCurrent()) ? learnCurrent().normalHi : null;
+      rollingPush(chartAnomaly.data.datasets[1].data, _lb);
+      chartAnomaly.update("none");
+    }
+    /* feed the Learning-tab calibration/verdict */
+    learnOnSample(d.bfi_rate, d.retry1_count);
   }
 
   /* ---- Handle telemetry sample ---- */
@@ -2542,8 +2522,7 @@
       return;
     }
     if (d.type === "calib") {
-      learnUpdateCalib(d.count, d.target);
-      return;
+      return;  /* legacy auto-capture message — superseded by live BFI calibration */
     }
     if (d.type === "bfi_detect") {
       handleBfiDetect(d);
@@ -2555,11 +2534,16 @@
 
     /* existing telemetry handling below */
 
-    $valTxTput.textContent = fx(d.throughput_tx_mbps, 1);
+    $valTxTput.textContent = fxTput(d.throughput_tx_mbps);
     $valRetry.textContent  = fx(d.retry_rate, 3);
     $valTxPer.textContent  = fx(d.tx_per_pct, 2);
     $valRssi.textContent   = (d.rssi0 === null || d.rssi0 === undefined) ? "—" : d.rssi0;
-    $valTemp.textContent   = (d.temp_c === null || d.temp_c === undefined) ? "—" : d.temp_c;
+    /* Temp: availability-driven. iwpriv rigs (GN630v/AX3200) send a real value;
+       a source with no sensor (mt76) sends null -> "N/A" instead of a fake 0. */
+    var _tempNA = (d.temp_c === null || d.temp_c === undefined);
+    $valTemp.textContent = _tempNA ? "N/A" : d.temp_c;
+    var _tempUnit = document.getElementById("valTempUnit");
+    if (_tempUnit) _tempUnit.style.display = _tempNA ? "none" : "";
 
     /* BFI / CSI panel (only update if data present) */
     if (d.bfi_phi_mean !== null && d.bfi_phi_mean !== undefined) {
@@ -2588,25 +2572,8 @@
       showError(null);
     }
 
-    /* Detection panel */
-    if (d.anomaly_score === null || d.anomaly_score === undefined) {
-      $detectStatus.className = "detect-status offline";
-      $detectStatus.textContent = "DETECTOR OFFLINE";
-      $detectScoreVal.textContent = "\u2014";
-    } else if (runningMode === "live" && d.detector_calibrated === false) {
-      /* live but the model was never baselined for THIS environment → don't cry attack */
-      $detectStatus.className = "detect-status uncalib";
-      $detectStatus.textContent = "UNCALIBRATED";
-      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
-    } else if (d.is_anomaly) {
-      $detectStatus.className = "detect-status attack";
-      $detectStatus.textContent = "ATTACK DETECTED";
-      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
-    } else {
-      $detectStatus.className = "detect-status normal";
-      $detectStatus.textContent = "NORMAL";
-      $detectScoreVal.textContent = d.anomaly_score.toFixed(3);
-    }
+    /* Detection panel is driven by the live BFI-storm detector (handleBfiDetect),
+       not by telemetry; the old anomaly-score model path was removed. */
 
     /* Clients connected */
     if (d.clients !== undefined) { renderClients(d.clients); }
@@ -2635,11 +2602,8 @@
     rollingPush(chartRssi.data.datasets[2].data, d.rssi2);
     rollingPush(chartRssi.data.datasets[3].data, d.rssi3);
 
-    if (d.anomaly_score !== null && d.anomaly_score !== undefined) {
-      rollingPush(chartAnomaly.data.labels, lbl);
-      rollingPush(chartAnomaly.data.datasets[0].data, d.anomaly_score);
-      rollingPush(chartAnomaly.data.datasets[1].data, 0);
-    }
+    /* BFI-rate chart is fed by the live bfi_detect stream in handleBfiDetect,
+       not by telemetry (the old anomaly-score series was removed). */
 
     trimCharts();
     allCharts.forEach(function (c) { c.update("none"); });
@@ -3067,526 +3031,171 @@
     $mcGrid.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.72rem;">Failed to load /tasks</div>';
   });
 
-  /* ---- LEARNING TAB ---- */
-  var learnAutoCapture = false;
-  var learnCalibCount = 0;
-  var learnCalibTarget = 150;
-  var learnCalibMin = 30;
-  var learnInterval = 2.0;
+  /* ---- LEARNING TAB (live BFI-storm calibration, one baseline per place) ---- */
+  var LEARN_SECS = 20;          /* how long "Learn my normal" listens */
+  var LEARN_MARGIN = 1.6;       /* alarm threshold = normal ceiling * this (min +3/s) */
+  var learnPlace = "home";
+  var learnBaselines = {};      /* place -> {normalHi, threshold, n, ts} */
+  var learnCollecting = false;
+  var learnSamples = [];
+  var learnStartTs = 0;
+  var learnLastRate = null, learnLastRetry = null;
 
-  var $learnModelLoaded   = document.getElementById("learnModelLoaded");
-  var $learnFeatures      = document.getElementById("learnFeatures");
-  var $learnSamples       = document.getElementById("learnSamples");
-  var $learnContamination = document.getElementById("learnContamination");
-  var $learnProfileBody   = document.getElementById("learnProfileBody");
-  var $learnCalibLabel    = document.getElementById("learnCalibLabel");
-  var $learnCalibAuto     = document.getElementById("learnCalibAuto");
-  var $learnCalibBar      = document.getElementById("learnCalibBar");
-  var $learnCaptureBtn    = document.getElementById("learnCaptureBtn");
-  var $learnAutoBtn       = document.getElementById("learnAutoBtn");
-  var $learnRetrainBtn    = document.getElementById("learnRetrainBtn");
-  var $learnResetBtn      = document.getElementById("learnResetBtn");
-  var $learnTrainResult   = document.getElementById("learnTrainResult");
-  var $learnMatchBar      = document.getElementById("learnMatchBar");
-  var $learnMatchVal      = document.getElementById("learnMatchVal");
-  var $learnAnomalyRate   = document.getElementById("learnAnomalyRate");
-  var $learnAnomalyWindow = document.getElementById("learnAnomalyWindow");
-  var $learnCalibTargetN  = document.getElementById("learnCalibTargetN");
-  var $learnCalibEstimate = document.getElementById("learnCalibEstimate");
-  var $learnHistoryList   = document.getElementById("learnHistoryList");
-  var $learnProfileName   = document.getElementById("learnProfileName");
-  var $learnProfileList   = document.getElementById("learnProfileList");
-  var learnProfileChecked = {};  /* name -> bool, persists across refreshes */
+  var $learnPlaces     = document.getElementById("learnPlaces");
+  var $learnStartBtn   = document.getElementById("learnStartBtn");
+  var $learnProgWrap   = document.getElementById("learnProgWrap");
+  var $learnProgFill   = document.getElementById("learnProgFill");
+  var $learnProgLbl    = document.getElementById("learnProgLbl");
+  var $learnDone       = document.getElementById("learnDone");
+  var $learnVerdict    = document.getElementById("learnVerdict");
+  var $learnVerdictSub = document.getElementById("learnVerdictSub");
+  var $learnDetPlace   = document.getElementById("learnDetPlace");
+  var $learnDetRate    = document.getElementById("learnDetRate");
+  var $learnDetRetry   = document.getElementById("learnDetRetry");
+  var $learnDetNormal  = document.getElementById("learnDetNormal");
+  var $learnDetThresh  = document.getElementById("learnDetThresh");
+  var $learnDetSamples = document.getElementById("learnDetSamples");
+  var $learnDetTs      = document.getElementById("learnDetTs");
+  var $learnForget     = document.getElementById("learnForget");
 
-  function learnCurrentProfile() {
-    return ($learnProfileName.value || "").trim().replace(/[^A-Za-z0-9_-]/g, "") || "default";
+  function learnLoad() {
+    try { learnBaselines = JSON.parse(localStorage.getItem("bw.learn.baselines") || "{}") || {}; }
+    catch (e) { learnBaselines = {}; }
+    try { learnPlace = localStorage.getItem("bw.learn.place") || "home"; } catch (e) { learnPlace = "home"; }
   }
+  function learnSave() {
+    try { localStorage.setItem("bw.learn.baselines", JSON.stringify(learnBaselines)); } catch (e) {}
+    try { localStorage.setItem("bw.learn.place", learnPlace); } catch (e) {}
+  }
+  function learnCurrent() { return learnBaselines[learnPlace] || null; }
+  function learnFmt(x) { return (x === null || x === undefined || isNaN(x)) ? "—" : (Math.round(x * 10) / 10); }
 
-  function learnFetchProfiles() {
-    fetch("/calibrate/profiles").then(function (r) { return r.json(); }).then(function (list) {
-      $learnProfileList.innerHTML = "";
-      if (!list || list.length === 0) {
-        $learnProfileList.textContent = "no captured samples yet";
-        return;
+  function learnRenderPlaces() {
+    if (!$learnPlaces) return;
+    var btns = $learnPlaces.querySelectorAll(".learn-place");
+    btns.forEach(function (b) {
+      var p = b.getAttribute("data-place");
+      if (!b.getAttribute("data-label")) {
+        b.setAttribute("data-label", b.textContent.replace(/\s*✓\s*$/, ""));
       }
-      list.forEach(function (p) {
-        var label = document.createElement("label");
-        label.style.cssText = "display:flex;align-items:center;gap:5px;cursor:pointer;";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = !!learnProfileChecked[p.profile];
-        cb.addEventListener("change", function () { learnProfileChecked[p.profile] = cb.checked; });
-        var span = document.createElement("span");
-        span.textContent = p.profile + " (" + p.count + ")";
-        label.appendChild(cb);
-        label.appendChild(span);
-        $learnProfileList.appendChild(label);
-      });
-    }).catch(function () {});
-  }
-
-  document.querySelectorAll("[data-profile-name]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      $learnProfileName.value = btn.getAttribute("data-profile-name");
-    });
-  });
-
-  /* ---- Switchable per-situation baselines ---- */
-  var $learnActiveBaseline = document.getElementById("learnActiveBaseline");
-  var $learnBaselineList   = document.getElementById("learnBaselineList");
-  var $learnBaselineResult = document.getElementById("learnBaselineResult");
-  var learnBaselineMin = 30;
-
-  function learnBaselineMsg(text, ok) {
-    $learnBaselineResult.textContent = text;
-    $learnBaselineResult.style.color = ok ? "var(--ok)" : "var(--danger)";
-  }
-
-  function learnBaselinePost(url, body, okText) {
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.error) { learnBaselineMsg("Error: " + d.error, false); return; }
-      learnBaselineMsg(okText(d), true);
-      learnFetchBaselines();
-      learnFetchStatus();
-      learnFetchHistory();
-    }).catch(function (e) { learnBaselineMsg("Fetch error: " + e, false); });
-  }
-
-  function learnFetchBaselines() {
-    fetch("/baselines").then(function (r) { return r.json(); }).then(function (d) {
-      learnBaselineMin = d.min || 30;
-      $learnActiveBaseline.textContent = d.active || "none";
-      $learnBaselineList.innerHTML = "";
-      var rows = d.baselines || [];
-      if (rows.length === 0) {
-        $learnBaselineList.textContent = "No profiles captured yet — capture some samples under a profile name above.";
-        return;
-      }
-      rows.forEach(function (b) {
-        var row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;";
-
-        var name = document.createElement("span");
-        name.style.cssText = "color:var(--text-bright);min-width:130px;font-weight:700;";
-        name.textContent = (b.active ? "▶ " : "") + b.profile;
-
-        var meta = document.createElement("span");
-        meta.style.cssText = "color:var(--muted);min-width:150px;";
-        meta.textContent = b.count + " samples" + (b.has_model ? " · trained" : " · no model");
-
-        var trainBtn = document.createElement("button");
-        trainBtn.className = "mc-btn run";
-        trainBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
-        trainBtn.textContent = b.has_model ? "Retrain" : "Train";
-        trainBtn.disabled = b.count < learnBaselineMin;
-        if (trainBtn.disabled) trainBtn.title = "need ≥ " + learnBaselineMin + " samples";
-        trainBtn.addEventListener("click", function () {
-          learnBaselineMsg("Training '" + b.profile + "'…", true);
-          $learnBaselineResult.style.color = "var(--muted)";
-          learnBaselinePost("/baselines/train", { profile: b.profile, activate: true },
-            function (d) { return "Trained + activated '" + d.profile + "' (" + d.n_samples + " samples). " + (d.fpr || ""); });
-        });
-
-        var actBtn = document.createElement("button");
-        actBtn.className = "mc-btn";
-        actBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
-        actBtn.textContent = b.active ? "Active" : "Activate";
-        actBtn.disabled = b.active || !b.has_model;
-        if (!b.has_model) actBtn.title = "train it first";
-        if (b.active) { actBtn.style.borderColor = "var(--ok)"; actBtn.style.color = "var(--ok)"; }
-        actBtn.addEventListener("click", function () {
-          learnBaselinePost("/baselines/activate", { profile: b.profile },
-            function (d) { return "Activated '" + d.active + "' as the live detector."; });
-        });
-
-        var renBtn = document.createElement("button");
-        renBtn.className = "mc-btn";
-        renBtn.style.cssText = "padding:4px 10px;font-size:0.6rem;";
-        renBtn.textContent = "Rename";
-        renBtn.addEventListener("click", function () {
-          var nn = window.prompt("Rename baseline '" + b.profile + "' to:", b.profile);
-          if (!nn || nn.trim() === "" || nn.trim() === b.profile) return;
-          learnBaselinePost("/baselines/rename", { old: b.profile, new: nn.trim() },
-            function (d) { return "Renamed '" + d.renamed[0] + "' → '" + d.renamed[1] + "'."; });
-        });
-
-        row.appendChild(name);
-        row.appendChild(meta);
-        row.appendChild(trainBtn);
-        row.appendChild(actBtn);
-        row.appendChild(renBtn);
-        $learnBaselineList.appendChild(row);
-      });
-    }).catch(function () {});
-  }
-
-  function learnFetchStatus() {
-    fetch("/model-status").then(function (r) { return r.json(); }).then(function (d) {
-      $learnModelLoaded.textContent = d.model_loaded ? "YES" : "NO";
-      $learnModelLoaded.style.color = d.model_loaded ? "var(--ok)" : "var(--danger)";
-      $learnFeatures.textContent = d.features.join(", ") || "\u2014";
-      $learnSamples.textContent = d.n_samples || "\u2014";
-      $learnContamination.textContent = d.contamination !== null ? d.contamination : "\u2014";
-      learnCalibCount = d.calib_count || 0;
-      learnCalibTarget = d.calib_target || 150;
-      learnAutoCapture = d.auto_capture || false;
-      learnInterval = d.interval || 2.0;
-      var hours = learnCalibTarget * learnInterval / 3600;
-      $learnCalibTargetN.value = parseFloat(hours.toFixed(4));
-      learnUpdateEstimate();
-      learnUpdateCalibUI();
-      learnUpdateMatch(d.match_rate, d.anomaly_rate);
-      learnRenderProfile(d.normal_profile);
-    }).catch(function () {});
-  }
-
-  function learnRenderProfile(profile) {
-    $learnProfileBody.innerHTML = "";
-    if (!profile) return;
-    var feats = Object.keys(profile);
-    feats.forEach(function (f) {
-      var p = profile[f];
-      var range = p.max - p.min;
-      var tr = document.createElement("tr");
-      tr.style.borderBottom = "1px solid var(--border)";
-      var tdName = document.createElement("td");
-      tdName.style.cssText = "padding:6px 10px;color:var(--text-bright);";
-      tdName.textContent = f;
-      var tdMean = document.createElement("td");
-      tdMean.style.cssText = "padding:6px 10px;text-align:right;color:var(--text);";
-      tdMean.textContent = p.mean.toFixed(4);
-      var tdMin = document.createElement("td");
-      tdMin.style.cssText = "padding:6px 10px;text-align:right;color:var(--muted);";
-      tdMin.textContent = p.min.toFixed(4);
-      var tdMax = document.createElement("td");
-      tdMax.style.cssText = "padding:6px 10px;text-align:right;color:var(--muted);";
-      tdMax.textContent = p.max.toFixed(4);
-      var tdBar = document.createElement("td");
-      tdBar.style.cssText = "padding:6px 10px;";
-      var barBg = document.createElement("div");
-      barBg.style.cssText = "background:var(--border);height:6px;position:relative;";
-      var barFg = document.createElement("div");
-      barFg.style.cssText = "background:var(--accent);height:100%;width:100%;";
-      barBg.appendChild(barFg);
-      tdBar.appendChild(barBg);
-      tr.appendChild(tdName);
-      tr.appendChild(tdMean);
-      tr.appendChild(tdMin);
-      tr.appendChild(tdMax);
-      tr.appendChild(tdBar);
-      $learnProfileBody.appendChild(tr);
+      b.classList.toggle("active", p === learnPlace);
+      b.textContent = b.getAttribute("data-label") + (learnBaselines[p] ? " ✓" : "");
     });
   }
 
-  function learnUpdateCalib(count, target) {
-    learnCalibCount = count;
-    learnCalibTarget = target;
-    learnUpdateCalibUI();
-  }
-
-  function learnUpdateEstimate() {
-    var hours = parseFloat($learnCalibTargetN.value) || 0;
-    var est = Math.round(hours * 3600 / learnInterval);
-    $learnCalibEstimate.textContent = "\u2248 " + est.toLocaleString() + " samples (@" + learnInterval.toFixed(1) + "s each)";
-  }
-
-  function learnUpdateCalibUI() {
-    var hrs = learnCalibTarget * learnInterval / 3600;
-    var hrsFmt = hrs >= 1 ? hrs.toFixed(1) + "h" : (hrs * 60).toFixed(0) + "m";
-    $learnCalibLabel.textContent = learnCalibCount + " / " + learnCalibTarget + " samples (~" + learnInterval.toFixed(1) + "s each, \u2248" + hrsFmt + ")";
-    var pct = learnCalibTarget > 0 ? (learnCalibCount / learnCalibTarget) * 100 : 0;
-    $learnCalibBar.style.width = Math.min(pct, 100) + "%";
-    $learnCalibBar.style.background = learnCalibCount >= learnCalibTarget ? "var(--ok)" : "var(--accent)";
-    $learnRetrainBtn.disabled = learnCalibCount < learnCalibMin;
-    $learnAutoBtn.textContent = "Auto-capture: " + (learnAutoCapture ? "ON" : "OFF");
-    $learnAutoBtn.style.borderColor = learnAutoCapture ? "var(--ok)" : "var(--border)";
-    $learnAutoBtn.style.color = learnAutoCapture ? "var(--ok)" : "var(--text)";
-    $learnCalibAuto.textContent = "auto: " + (learnAutoCapture ? "on" : "off");
-    if (learnCalibCount >= learnCalibTarget) {
-      $learnCaptureBtn.disabled = true;
-      $learnCaptureBtn.style.opacity = "0.35";
-    }
-  }
-
-  function learnUpdateMatch(matchRate, anomalyRate) {
-    if (matchRate === null || matchRate === undefined) {
-      $learnMatchVal.textContent = "—";
-      $learnMatchBar.style.width = "0%";
-      $learnAnomalyRate.textContent = "—";
-      $learnAnomalyWindow.textContent = "0";
+  function learnRenderVerdict() {
+    var base = learnCurrent();
+    if ($learnDetPlace)   $learnDetPlace.textContent = learnPlace;
+    if ($learnDetRate)    $learnDetRate.textContent = learnFmt(learnLastRate);
+    if ($learnDetRetry)   $learnDetRetry.textContent = (learnLastRetry == null ? "—" : learnLastRetry);
+    if ($learnDetNormal)  $learnDetNormal.textContent = base ? learnFmt(base.normalHi) : "—";
+    if ($learnDetThresh)  $learnDetThresh.textContent = base ? learnFmt(base.threshold) : "—";
+    if ($learnDetSamples) $learnDetSamples.textContent = base ? base.n : 0;
+    if ($learnDetTs)      $learnDetTs.textContent = (base && base.ts) ? ("· learned " + base.ts) : "";
+    if (!$learnVerdict) return;
+    if (learnCollecting) {
+      $learnVerdict.className = "learn-verdict standby";
+      $learnVerdict.textContent = "LEARNING…";
+      $learnVerdictSub.textContent = "Listening to normal traffic.";
       return;
     }
-    var pct = Math.round(matchRate * 100);
-    $learnMatchVal.textContent = pct + "%";
-    $learnMatchBar.style.width = pct + "%";
-    if (pct >= 80) {
-      $learnMatchBar.style.background = "var(--ok)";
-      $learnMatchVal.style.color = "var(--ok)";
-    } else if (pct >= 50) {
-      $learnMatchBar.style.background = "var(--accent)";
-      $learnMatchVal.style.color = "var(--accent)";
-    } else {
-      $learnMatchBar.style.background = "var(--danger)";
-      $learnMatchVal.style.color = "var(--danger)";
+    if (!base) {
+      $learnVerdict.className = "learn-verdict standby";
+      $learnVerdict.textContent = "LEARN FIRST";
+      $learnVerdictSub.textContent = "Press “Learn my normal Wi-Fi” above for " + learnPlace + ".";
+      return;
     }
-    $learnAnomalyRate.textContent = (anomalyRate * 100).toFixed(1) + "%";
-  }
-
-  $learnCaptureBtn.addEventListener("click", function () {
-    fetch("/calibrate/capture", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile: learnCurrentProfile() }),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d.error) { $learnTrainResult.textContent = "Error: " + d.error; return; }
-        learnUpdateCalib(d.count, d.target);
-        learnFetchProfiles();
-      })
-      .catch(function (e) { $learnTrainResult.textContent = "Fetch error: " + e; });
-  });
-
-  $learnAutoBtn.addEventListener("click", function () {
-    fetch("/calibrate/auto", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enable: !learnAutoCapture, profile: learnCurrentProfile() }),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        learnAutoCapture = d.auto_capture;
-        learnUpdateCalibUI();
-        learnFetchProfiles();
-      })
-      .catch(function () {});
-  });
-
-  $learnRetrainBtn.addEventListener("click", function () {
-    $learnRetrainBtn.disabled = true;
-    $learnTrainResult.textContent = "Training...";
-    $learnTrainResult.style.color = "var(--muted)";
-    var checked = Object.keys(learnProfileChecked).filter(function (k) { return learnProfileChecked[k]; });
-    fetch("/calibrate/train", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(checked.length ? { profiles: checked } : {}),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d.error) {
-          $learnTrainResult.textContent = "Error: " + d.error;
-          $learnTrainResult.style.color = "var(--danger)";
-          $learnRetrainBtn.disabled = false;
-          return;
-        }
-        $learnTrainResult.textContent = (d.fpr || "") + " — model reloaded (" + d.n_samples + " samples)";
-        $learnTrainResult.style.color = "var(--ok)";
-        learnFetchStatus();
-        learnFetchHistory();
-      })
-      .catch(function (e) {
-        $learnTrainResult.textContent = "Fetch error: " + e;
-        $learnTrainResult.style.color = "var(--danger)";
-        $learnRetrainBtn.disabled = false;
-      });
-  });
-
-  $learnResetBtn.addEventListener("click", function () {
-    fetch("/calibrate/reset", { method: "POST" })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        learnUpdateCalib(d.count || 0, d.target || 150);
-        $learnTrainResult.textContent = "";
-        $learnCaptureBtn.disabled = false;
-        $learnCaptureBtn.style.opacity = "";
-        learnProfileChecked = {};
-        learnFetchProfiles();
-      })
-      .catch(function () {});
-  });
-
-  /* ---- Target duration (hours) sync ---- */
-  $learnCalibTargetN.addEventListener("change", function () {
-    var hours = parseFloat($learnCalibTargetN.value);
-    if (isNaN(hours) || hours < 0.02) { hours = 0.02; $learnCalibTargetN.value = 0.02; }
-    if (hours > 48) { hours = 48; $learnCalibTargetN.value = 48; }
-    learnUpdateEstimate();
-    fetch("/calibrate/target", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hours: hours }),
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.ok) {
-        learnCalibTarget = d.target;
-        learnInterval = d.interval || learnInterval;
-        learnUpdateEstimate();
-        learnUpdateCalibUI();
-      }
-    }).catch(function () {});
-  });
-
-  /* ---- Quick-pick duration buttons ---- */
-  document.querySelectorAll("[data-calib-hours]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var hours = parseFloat(btn.getAttribute("data-calib-hours"));
-      $learnCalibTargetN.value = hours;
-      learnUpdateEstimate();
-      fetch("/calibrate/target", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hours: hours }),
-      }).then(function (r) { return r.json(); }).then(function (d) {
-        if (d.ok) {
-          learnCalibTarget = d.target;
-          learnInterval = d.interval || learnInterval;
-          learnUpdateEstimate();
-          learnUpdateCalibUI();
-        }
-      }).catch(function () {});
-    });
-  });
-
-  /* ---- Training history ---- */
-  function learnFetchHistory() {
-    fetch("/training-history").then(function (r) { return r.json(); }).then(function (entries) {
-      $learnHistoryList.innerHTML = "";
-      if (!entries || entries.length === 0) {
-        $learnHistoryList.textContent = "No training runs yet.";
-        return;
-      }
-      entries.forEach(function (entry, idx) {
-        var row = document.createElement("div");
-        row.style.cssText = "padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.2s;display:flex;align-items:center;gap:12px;";
-        var tsSpan = document.createElement("span");
-        tsSpan.style.cssText = "color:var(--text-bright);min-width:140px;";
-        tsSpan.textContent = entry.ts || "?";
-        var nSpan = document.createElement("span");
-        nSpan.style.cssText = "color:var(--accent);min-width:60px;";
-        nSpan.textContent = (entry.n_samples || 0) + " samples";
-        var srcSpan = document.createElement("span");
-        srcSpan.style.cssText = "color:var(--muted);min-width:90px;";
-        srcSpan.textContent = entry.source || "?";
-        var fprSpan = document.createElement("span");
-        fprSpan.style.cssText = "color:var(--muted-dim);";
-        fprSpan.textContent = entry.training_fpr !== null ? ("FPR: " + entry.training_fpr) : "";
-        var delBtn = document.createElement("button");
-        delBtn.className = "mc-btn stop";
-        delBtn.style.cssText = "margin-left:auto;padding:2px 9px;font-size:0.62rem;line-height:1;";
-        delBtn.textContent = "×";
-        delBtn.title = "delete this run";
-        delBtn.addEventListener("click", function (ev) {
-          ev.stopPropagation();  /* don't toggle the row's detail panel */
-          fetch("/training-history/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ts: entry.ts }),
-          }).then(function (r) { return r.json(); }).then(function () {
-            learnFetchHistory();
-          }).catch(function () {});
-        });
-
-        row.appendChild(tsSpan);
-        row.appendChild(nSpan);
-        row.appendChild(srcSpan);
-        row.appendChild(fprSpan);
-        row.appendChild(delBtn);
-
-        var detail = document.createElement("div");
-        detail.style.cssText = "display:none;padding:10px;background:var(--panel-2);border-bottom:1px solid var(--border);font-size:0.68rem;";
-        var profile = entry.feature_profile || {};
-        var feats = Object.keys(profile);
-        if (feats.length > 0) {
-          var tbl = document.createElement("table");
-          tbl.style.cssText = "width:100%;border-collapse:collapse;";
-          var thead = document.createElement("thead");
-          thead.innerHTML = '<tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px 8px;color:var(--muted);">Feature</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Mean</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Min</th><th style="text-align:right;padding:4px 8px;color:var(--muted);">Max</th></tr>';
-          tbl.appendChild(thead);
-          var tbody = document.createElement("tbody");
-          feats.forEach(function (f) {
-            var p = profile[f];
-            var tr = document.createElement("tr");
-            tr.style.borderBottom = "1px solid var(--border)";
-            tr.innerHTML = '<td style="padding:4px 8px;color:var(--text-bright);">' + f + '</td>' +
-              '<td style="padding:4px 8px;text-align:right;color:var(--text);">' + (p.mean !== undefined ? p.mean.toFixed(4) : "-") + '</td>' +
-              '<td style="padding:4px 8px;text-align:right;color:var(--muted);">' + (p.min !== undefined ? p.min.toFixed(4) : "-") + '</td>' +
-              '<td style="padding:4px 8px;text-align:right;color:var(--muted);">' + (p.max !== undefined ? p.max.toFixed(4) : "-") + '</td>';
-            tbody.appendChild(tr);
-          });
-          tbl.appendChild(tbody);
-          detail.appendChild(tbl);
-        }
-        var params = entry.model_params || {};
-        var paramDiv = document.createElement("div");
-        paramDiv.style.cssText = "margin-top:8px;color:var(--muted-dim);";
-        paramDiv.textContent = "Params: n_estimators=" + (params.n_estimators || "?") + ", contamination=" + (params.contamination !== undefined ? params.contamination : "?");
-        detail.appendChild(paramDiv);
-        if (entry.note) {
-          var noteDiv = document.createElement("div");
-          noteDiv.style.cssText = "margin-top:4px;color:var(--muted-dim);font-style:italic;";
-          noteDiv.textContent = entry.note;
-          detail.appendChild(noteDiv);
-        }
-
-        row.addEventListener("click", function () {
-          var isOpen = detail.style.display !== "none";
-          detail.style.display = isOpen ? "none" : "block";
-          row.style.background = isOpen ? "" : "var(--accent-dim)";
-        });
-        row.addEventListener("mouseenter", function () { row.style.background = "var(--panel-2)"; });
-        row.addEventListener("mouseleave", function () { row.style.background = detail.style.display !== "none" ? "var(--accent-dim)" : ""; });
-
-        $learnHistoryList.appendChild(row);
-        $learnHistoryList.appendChild(detail);
-      });
-    }).catch(function () {
-      $learnHistoryList.textContent = "Failed to load history.";
-    });
-  }
-
-  var $learnHistoryClear = document.getElementById("learnHistoryClear");
-  if ($learnHistoryClear) {
-    $learnHistoryClear.addEventListener("click", function () {
-      if (!window.confirm("Clear the ENTIRE training history? This can't be undone.")) return;
-      fetch("/training-history/clear", { method: "POST" })
-        .then(function (r) { return r.json(); })
-        .then(function () { learnFetchHistory(); })
-        .catch(function () {});
-    });
-  }
-
-  learnFetchHistory();
-
-  learnFetchStatus();
-
-  learnFetchProfiles();
-
-  learnFetchBaselines();
-
-  /* Periodically refresh model-status when Learning tab is visible */
-  setInterval(function () {
-    var learnTab = document.getElementById("tab-learning");
-    if (learnTab && learnTab.classList.contains("active")) {
-      learnFetchStatus();
-      learnFetchProfiles();
-      learnFetchBaselines();
+    if (learnLastRate === null) {
+      $learnVerdict.className = "learn-verdict standby";
+      $learnVerdict.textContent = "WAITING";
+      $learnVerdictSub.textContent = "No live feed yet — start the BFI-Storm feed to watch this place.";
+      return;
     }
-  }, 3000);
+    var attack = learnLastRate >= base.threshold;
+    $learnVerdict.className = "learn-verdict " + (attack ? "attack" : "normal");
+    $learnVerdict.textContent = attack ? "ATTACK" : "NORMAL";
+    $learnVerdictSub.textContent = learnFmt(learnLastRate) + " frames/sec vs normal ≤ " +
+      learnFmt(base.normalHi) + " (alarm at " + learnFmt(base.threshold) + ")";
+  }
 
-  /* Refresh training history when switching to Learning tab */
-  tabBtns.forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      if (btn.getAttribute("data-tab") === "learning") {
-        learnFetchHistory();
-        learnFetchProfiles();
-        learnFetchBaselines();
-      }
-    });
+  function learnFinish() {
+    learnCollecting = false;
+    if ($learnStartBtn) $learnStartBtn.disabled = false;
+    if ($learnProgWrap) $learnProgWrap.style.display = "none";
+    var n = learnSamples.length;
+    if (n < 3) {
+      $learnDone.style.color = "var(--danger)";
+      $learnDone.textContent = "✗ Didn’t hear enough traffic (" + n +
+        " windows). Is the BFI-Storm feed running with the attack OFF? Try again.";
+      learnRenderVerdict();
+      return;
+    }
+    var hi = Math.max.apply(null, learnSamples);
+    var thr = Math.max(hi * LEARN_MARGIN, hi + 3);
+    learnBaselines[learnPlace] = { normalHi: hi, threshold: thr, n: n, ts: new Date().toLocaleString() };
+    learnSave();
+    $learnDone.style.color = "var(--ok)";
+    $learnDone.textContent = "✓ Learned " + learnPlace + " — normal is about " +
+      learnFmt(hi) + " frames/sec. I’ll flag anything above " + learnFmt(thr) + ".";
+    learnRenderPlaces();
+    learnRenderVerdict();
+  }
+
+  /* called from handleBfiDetect on every live window (~1/s) */
+  function learnOnSample(rate, retry) {
+    if (typeof rate !== "number" || isNaN(rate)) return;
+    learnLastRate = rate;
+    learnLastRetry = (retry == null ? null : retry);
+    if (learnCollecting) {
+      learnSamples.push(rate);
+      var el = (Date.now() - learnStartTs) / 1000;
+      if ($learnProgFill) $learnProgFill.style.width = Math.min(100, (el / LEARN_SECS) * 100) + "%";
+      if ($learnProgLbl) $learnProgLbl.textContent = "Listening… " +
+        Math.ceil(Math.max(0, LEARN_SECS - el)) + "s left (" + learnSamples.length + " windows)";
+      if (el >= LEARN_SECS) learnFinish();
+    }
+    learnRenderVerdict();
+  }
+
+  if ($learnStartBtn) $learnStartBtn.addEventListener("click", function () {
+    if (learnCollecting) return;
+    learnCollecting = true;
+    learnSamples = [];
+    learnStartTs = Date.now();
+    $learnStartBtn.disabled = true;
+    $learnDone.textContent = "";
+    if ($learnProgWrap) $learnProgWrap.style.display = "block";
+    if ($learnProgFill) $learnProgFill.style.width = "0%";
+    if ($learnProgLbl) $learnProgLbl.textContent = "Listening…";
+    learnRenderVerdict();
+    /* safety: end the attempt even if the feed is silent */
+    setTimeout(function () { if (learnCollecting) learnFinish(); }, (LEARN_SECS + 4) * 1000);
   });
+
+  if ($learnPlaces) $learnPlaces.addEventListener("click", function (e) {
+    var b = e.target.closest(".learn-place");
+    if (!b) return;
+    learnPlace = b.getAttribute("data-place");
+    learnSave();
+    $learnDone.textContent = "";
+    learnRenderPlaces();
+    learnRenderVerdict();
+  });
+
+  if ($learnForget) $learnForget.addEventListener("click", function () {
+    if (!learnBaselines[learnPlace]) return;
+    if (!window.confirm("Forget what " + learnPlace + " learned?")) return;
+    delete learnBaselines[learnPlace];
+    learnSave();
+    $learnDone.textContent = "";
+    learnRenderPlaces();
+    learnRenderVerdict();
+  });
+
+  learnLoad();
+  learnRenderPlaces();
+  learnRenderVerdict();
+
 
   /* ---- ROUTER FEED PANEL ---- */
   var $rfPanel   = document.getElementById("rfPanel");

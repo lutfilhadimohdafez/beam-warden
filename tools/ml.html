@@ -437,506 +437,188 @@
   <div class="header">
     <div class="header-left">
       <div class="wordmark">BEAM <span class="sep">//</span> <span class="warden">WARDEN</span></div>
-      <div class="subtitle">ML Anomaly Detection Engine</div>
+      <div class="subtitle">BFI-Storm Detection Engine</div>
     </div>
     <div class="header-right">
       <a href="/" class="nav-link">&larr; Back to Dashboard</a>
     </div>
   </div>
 
-  <!-- LIVE PIPELINE -->
+  <!-- WHAT IT DETECTS -->
   <div class="section">
-    <div class="section-head">Live Processing Pipeline</div>
-    <div class="section-sub">Real-time sample flow: raw telemetry &rarr; extraction &rarr; scaling &rarr; isolation forest &rarr; verdict</div>
-    <div class="panel pipeline-wrap">
-      <div class="sample-token" id="sampleToken"></div>
-      <div class="pipeline-track">
-        <!-- Stage 1: Raw -->
-        <div class="pipe-stage" id="stage1">
-          <div class="pipe-stage-num">Stage 1</div>
-          <div class="pipe-stage-title">Raw</div>
-          <div class="pipe-stage-body" id="stage1Body">
-            <div class="waiting-overlay">Waiting for samples&hellip;</div>
-          </div>
-        </div>
-        <div class="pipe-arrow">&rarr;</div>
-        <!-- Stage 2: Extract -->
-        <div class="pipe-stage" id="stage2">
-          <div class="pipe-stage-num">Stage 2</div>
-          <div class="pipe-stage-title">Extract</div>
-          <div class="pipe-stage-body" id="stage2Body">
-            <div class="waiting-overlay">Feature vector</div>
-          </div>
-        </div>
-        <div class="pipe-arrow">&rarr;</div>
-        <!-- Stage 3: Scale -->
-        <div class="pipe-stage" id="stage3">
-          <div class="pipe-stage-num">Stage 3</div>
-          <div class="pipe-stage-title">Scale</div>
-          <div class="pipe-stage-body" id="stage3Body">
-            <div class="formula">z = (x &minus; &mu;) / &sigma;</div>
-          </div>
-        </div>
-        <div class="pipe-arrow">&rarr;</div>
-        <!-- Stage 4: Forest -->
-        <div class="pipe-stage" id="stage4">
-          <div class="pipe-stage-num">Stage 4</div>
-          <div class="pipe-stage-title">Forest</div>
-          <div class="pipe-stage-body" id="stage4Body">
-            <div class="waiting-overlay">Isolation trees</div>
-          </div>
-        </div>
-        <div class="pipe-arrow">&rarr;</div>
-        <!-- Stage 5: Score -->
-        <div class="pipe-stage" id="stage5">
-          <div class="pipe-stage-num">Stage 5</div>
-          <div class="pipe-stage-title">Score</div>
-          <div class="pipe-stage-body" id="stage5Body">
-            <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- TREE VISUALIZATION -->
-  <div class="section">
-    <div class="section-head">Isolation Forest Trees</div>
-    <div class="section-sub">Where the current sample lands in the first 4 trees</div>
-    <div class="panel">
-      <div class="tree-grid" id="treeGrid">
-        <div class="waiting-overlay">Loading forest structure&hellip;</div>
-      </div>
-      <div class="tree-legend">
-        <span><div class="swatch" style="background:var(--ok)"></div> Long path = normal</span>
-        <span><div class="swatch" style="background:var(--danger)"></div> Short path = anomaly</span>
-        <span><div class="swatch" style="background:var(--accent)"></div> Current sample</span>
-      </div>
-      <div class="score-box" id="scoreSummary" style="display:none">
-        <div><span class="label">Average path length E(h):</span> <span id="avgPath">—</span></div>
-        <div><span class="label">c(n) = 2H(n&minus;1) &minus; 2(n&minus;1)/n:</span> <span id="cnVal">—</span></div>
-        <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
-        <div><span class="label">Anomaly score:</span> <span id="finalScore">—</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- WHY ISOLATION FOREST -->
-  <div class="section">
-    <div class="section-head">Why Isolation Forest</div>
-    <div class="section-sub">Unsupervised anomaly detection for WiFi telemetry</div>
+    <div class="section-head">What it detects</div>
+    <div class="section-sub">The attack's own on-air signature &mdash; not its effect on the link</div>
     <div class="panel">
       <p class="body-text">
-        <strong>Isolation Forest</strong> isolates anomalies by random partitioning.
-        Anomalies are isolated in fewer splits because they are rare and distinct, yielding a short average path length.
-        The score formula: <code>s = 2^(-E(h)/c(n))</code> where <code>E(h)</code> is the mean path length across all trees
-        and <code>c(n) = 2H(n-1) - 2(n-1)/n</code> is the average path length of unsuccessful search in BST.
-        Score &gt; 0.5 = normal, &lt; 0.5 = anomaly.
+        The BeamCraft attack works by <strong>injecting forged beamforming-feedback (BFI) frames</strong>
+        that impersonate the victim. Those injected frames are themselves the giveaway: during an attack the
+        victim's BFI appears on air far more often than the AP could be sounding it, and every forgery carries
+        the <strong>RETRY=1</strong> bit. So Beam-Warden does not look for the attack's <em>effect</em> on
+        throughput (which barely moves on a strong, close link) &mdash; it detects the
+        <strong>forgery storm itself</strong>.
       </p>
     </div>
   </div>
 
-  <!-- THE 11 VARIABLES -->
+  <!-- PIPELINE -->
   <div class="section">
-    <div class="section-head">The 11 Variables</div>
-    <div class="section-sub">Feature set and expected behaviour under attack</div>
+    <div class="section-head">How it works</div>
+    <div class="section-sub">Count the victim's BFI frames per 2-second window, compare to this network's normal</div>
+    <div class="panel pipeline-wrap">
+      <div class="pipeline-track">
+        <div class="pipe-stage">
+          <div class="pipe-stage-num">Stage 1</div>
+          <div class="pipe-stage-title">Sniff</div>
+          <div class="pipe-stage-body">
+            Monitor the victim's VHT compressed-beamforming frames on air.<br><br>
+            <span class="formula">category_code == 21<br>sa == victim MAC</span>
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <div class="pipe-stage">
+          <div class="pipe-stage-num">Stage 2</div>
+          <div class="pipe-stage-title">Count</div>
+          <div class="pipe-stage-body">
+            Per 2-second window, tally how many BFI frames arrived and how many carry
+            <span class="val">RETRY=1</span>.
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <div class="pipe-stage">
+          <div class="pipe-stage-num">Stage 3</div>
+          <div class="pipe-stage-title">Compare</div>
+          <div class="pipe-stage-body">
+            Is the rate above <span class="val">this place's learned normal</span>? Forged
+            injection cannot help but push the rate up.
+          </div>
+        </div>
+        <div class="pipe-arrow">&rarr;</div>
+        <div class="pipe-stage">
+          <div class="pipe-stage-num">Stage 4</div>
+          <div class="pipe-stage-title">Verdict</div>
+          <div class="pipe-stage-body">
+            <span class="verdict-ok">NORMAL</span> &mdash; rate at baseline.<br>
+            <span class="verdict-bad">ATTACK</span> &mdash; rate spiked above normal.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEASURED SEPARATION -->
+  <div class="section">
+    <div class="section-head">Measured separation</div>
+    <div class="section-sub">Real hardware capture &mdash; no synthetic data</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-card-label">Normal window</div>
+        <div class="stat-card-value ok">~16</div>
+        <div class="stat-card-note">BFI frames / 2s (~8/s), RETRY=1 &asymp; 0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Attack window</div>
+        <div class="stat-card-value danger">~32</div>
+        <div class="stat-card-note">BFI frames / 2s (~16/s), RETRY=1 spikes</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Alarm threshold</div>
+        <div class="stat-card-value">~24</div>
+        <div class="stat-card-note">BFI / 2s (~12/s) &mdash; midpoint, no overlap</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">OBJ3 detection accuracy</div>
+        <div class="stat-card-value ok">100%</div>
+        <div class="stat-card-note">GroupKFold by phase (target &ge; 55%)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <div class="section">
+    <div class="section-head">The features</div>
+    <div class="section-sub">Four numbers per 2-second window, from the victim's on-air BFI frames</div>
     <div class="panel">
       <table class="data-table">
         <thead>
-          <tr><th>#</th><th>Feature</th><th>Normal</th><th>Under Attack</th></tr>
+          <tr><th>Feature</th><th>What it is</th><th>Under attack</th></tr>
         </thead>
         <tbody>
-          <tr><td>1</td><td class="feat-name">throughput_tx_mbps</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Collapses</td></tr>
-          <tr><td>2</td><td class="feat-name">throughput_rx_mbps</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Collapses</td></tr>
-          <tr><td>3</td><td class="feat-name">retry_rate</td><td class="feat-behavior">Low, near zero</td><td class="feat-behavior">Spikes</td></tr>
-          <tr><td>4</td><td class="feat-name">tx_per_pct</td><td class="feat-behavior">Low &lt;5%</td><td class="feat-behavior">Spikes</td></tr>
-          <tr><td>5</td><td class="feat-name">rx_per_pct</td><td class="feat-behavior">Low &lt;5%</td><td class="feat-behavior">Spikes</td></tr>
-          <tr><td>6</td><td class="feat-name">rssi0</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
-          <tr><td>7</td><td class="feat-name">rssi1</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
-          <tr><td>8</td><td class="feat-name">rssi2</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
-          <tr><td>9</td><td class="feat-name">rssi3</td><td class="feat-behavior">Stable</td><td class="feat-behavior">Shifts</td></tr>
-          <tr><td>10</td><td class="feat-name">tx_mcs</td><td class="feat-behavior">High (7-11)</td><td class="feat-behavior">Drops</td></tr>
-          <tr><td>11</td><td class="feat-name">tx_nss</td><td class="feat-behavior">Max streams</td><td class="feat-behavior">May drop</td></tr>
+          <tr><td class="feat-name">bfi_count</td><td class="feat-behavior">victim BFI frames in the window</td><td class="feat-behavior">roughly doubles (genuine + forgeries)</td></tr>
+          <tr><td class="feat-name">bfi_rate</td><td class="feat-behavior">bfi_count / 2s (frames/sec)</td><td class="feat-behavior">spikes</td></tr>
+          <tr><td class="feat-name">retry1_count</td><td class="feat-behavior">how many carry the RETRY=1 bit</td><td class="feat-behavior">spikes (set on every forgery)</td></tr>
+          <tr><td class="feat-name">retry1_ratio</td><td class="feat-behavior">retry1_count / bfi_count</td><td class="feat-behavior">spikes</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HONEST NOTE -->
+  <div class="section">
+    <div class="section-head">The model, honestly</div>
+    <div class="section-sub">What we report vs. where the signal really is</div>
+    <div class="panel">
+      <p class="body-text">
+        We report a <strong>RandomForest</strong> (200 trees) scored with <strong>GroupKFold by phase</strong>
+        (each 20-second A/B/A phase is one group, so near-identical adjacent windows never straddle the
+        train/test split &mdash; a leakage-safe estimate). But the honest framing is that the detector is
+        <strong>physics, not a 200-tree model</strong>: a single threshold on the doubled on-air BFI rate
+        already separates every window. Dropping <em>both</em> RETRY features still gives 100% &mdash; an
+        attacker who omits the RETRY=1 marker cannot inject forgeries without raising the rate, so they do
+        not evade detection.
+      </p>
+    </div>
+  </div>
+
+  <!-- PER-ENV CALIBRATION -->
+  <div class="section">
+    <div class="section-head">Per-environment calibration</div>
+    <div class="section-sub">The one production concept</div>
+    <div class="panel">
+      <p class="body-text">
+        Every network has its own normal BFI rate &mdash; a quiet home is not a busy event hall. So instead
+        of a fixed number, Beam-Warden <strong>learns this network's normal first</strong>, then flags any
+        window that spikes above it. You do that on the <strong><a href="/" class="nav-link" style="font-size:0.88rem;text-transform:none;letter-spacing:0;">Learning tab</a></strong>:
+        pick where you are, press <em>Learn my normal Wi-Fi</em> once with the attack off, and the live check
+        then shows NORMAL or ATTACK for that place.
+      </p>
+    </div>
+  </div>
+
+  <!-- SCOPE / STATUS -->
+  <div class="section">
+    <div class="section-head">Results &amp; honest status</div>
+    <div class="section-sub">What is proven, and what is still future work</div>
+    <div class="panel">
+      <p class="body-text">
+        <strong>100%</strong> detection (GroupKFold by phase, every fold 100%) on a real-hardware capture, well
+        past the <strong>&ge; 55%</strong> OBJ3 target. Scope, stated up front: this is <strong>within one
+        condition</strong> &mdash; one ~6-minute capture, two 20-second attack bursts, one distance / channel /
+        traffic load. <strong>Cross-condition generalisation is untested</strong> and is the honest next step
+        (&ge; 3 captures across different days / distances / channels / loads, reported as held-out-capture
+        accuracy). Packaging the engine as an on-box OpenWrt service is future work &mdash; detection needs a
+        monitor-mode capture, which the AC2100's mt7615 can't expose alongside its AP, so today it runs on the
+        laptop's monitor NIC beside the AP.
+      </p>
+    </div>
+  </div>
+
+  <!-- FILES -->
+  <div class="section">
+    <div class="section-head">Pipeline</div>
+    <div class="section-sub">Capture &rarr; window + train &rarr; live display</div>
+    <div class="panel">
+      <table class="data-table">
+        <thead><tr><th>File</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td class="feat-name">tools/bfi_run.py</td><td class="feat-behavior">capture harness: monitor + A/B/A (normal&rarr;attack&rarr;normal), tcpdump &rarr; pcap + phase timings</td></tr>
+          <tr><td class="feat-name">tools/bfi_features.py</td><td class="feat-behavior">slice the pcap into labelled 2s windows, train, print GroupKFold accuracy</td></tr>
+          <tr><td class="feat-name">tools/dashboard.py</td><td class="feat-behavior">_bfi_verdict + --bfi-feed / --replay: live / replay detection stream</td></tr>
+          <tr><td class="feat-name">tools/dashboard.html</td><td class="feat-behavior">BFI-Storm panel + Learning tab: NORMAL &harr; ATTACK display</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
 </div>
-
-<script>
-(function() {
-  "use strict";
-
-  // ── State ──
-  let forestData = null;
-  let ws = null;
-  let latestSample = null;
-  let animToken = null;
-  const FEATURE_KEYS = [
-    "throughput_tx_mbps","throughput_rx_mbps","retry_rate",
-    "tx_per_pct","rx_per_pct","rssi0","rssi1","rssi2","rssi3",
-    "tx_mcs","tx_nss"
-  ];
-
-  // ── Fetch forest viz ──
-  async function loadForest() {
-    try {
-      const r = await fetch("/forest-viz");
-      const d = await r.json();
-      if (d.error) return;
-      forestData = d;
-      renderTrees(null);
-    } catch(e) { /* silent */ }
-  }
-
-  // ── Harmonic number H(n) ──
-  function harmonic(n) {
-    let h = 0;
-    for (let i = 1; i < n; i++) h += 1/i;
-    return h;
-  }
-
-  // ── Path length through a tree for a scaled sample ──
-  function pathLength(tree, scaledX) {
-    let node = 0;
-    let depth = 0;
-    const maxDepth = 8;
-    while (depth < maxDepth) {
-      const feat = tree.feature[node];
-      if (feat === -2) break; // leaf
-      const thr = tree.threshold[node];
-      if (scaledX[feat] <= thr) {
-        node = tree.children_left[node];
-      } else {
-        node = tree.children_right[node];
-      }
-      depth++;
-      // check if new node is leaf
-      if (tree.children_left[node] === -1 && tree.children_right[node] === -1) break;
-    }
-    return { depth, leafNode: node };
-  }
-
-  // ── Render SVG tree (shallow, max depth 6) ──
-  function renderTreeSVG(tree, treeIdx, pathNodes, pathDepth, isAnomaly) {
-    const maxDrawDepth = 6;
-    const nodeR = 10;
-    const levelH = 44;
-    const svgW = 220;
-    const svgH = maxDrawDepth * levelH + 30;
-
-    // BFS to collect nodes up to maxDrawDepth
-    const nodes = []; // {id, depth, x, y, feat, thr, isLeaf, parent, side}
-    const queue = [{id: 0, depth: 0, parent: -1, side: 'none'}];
-    while (queue.length) {
-      const n = queue.shift();
-      if (n.depth > maxDrawDepth) continue;
-      const feat = tree.feature[n.id];
-      const isLeaf = (feat === -2) || (tree.children_left[n.id] === -1);
-      nodes.push({...n, feat, thr: tree.threshold[n.id], isLeaf});
-      if (!isLeaf && n.depth < maxDrawDepth) {
-        queue.push({id: tree.children_left[n.id], depth: n.depth+1, parent: n.id, side: 'L'});
-        queue.push({id: tree.children_right[n.id], depth: n.depth+1, parent: n.id, side: 'R'});
-      }
-    }
-
-    // Assign x positions per level
-    const levels = {};
-    nodes.forEach(n => {
-      if (!levels[n.depth]) levels[n.depth] = [];
-      levels[n.depth].push(n);
-    });
-    Object.keys(levels).forEach(d => {
-      const arr = levels[d];
-      arr.forEach((n, i) => {
-        n.x = (i + 0.5) * (svgW / arr.length);
-        n.y = 20 + parseInt(d) * levelH;
-      });
-    });
-
-    // Build node map for path lookup
-    const nodeMap = {};
-    nodes.forEach(n => nodeMap[n.id] = n);
-
-    // Path set for highlighting
-    const pathSet = new Set(pathNodes || []);
-
-    let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">`;
-
-    // Edges
-    nodes.forEach(n => {
-      if (n.parent >= 0 && nodeMap[n.parent]) {
-        const p = nodeMap[n.parent];
-        const onPath = pathSet.has(n.id) && pathSet.has(n.parent);
-        const stroke = onPath ? (isAnomaly ? '#ff4b4b' : '#35d07f') : '#242a38';
-        const sw = onPath ? 2 : 1;
-        svg += `<line x1="${p.x}" y1="${p.y+nodeR}" x2="${n.x}" y2="${n.y-nodeR}" stroke="${stroke}" stroke-width="${sw}"/>`;
-      }
-    });
-
-    // Nodes
-    nodes.forEach(n => {
-      const onPath = pathSet.has(n.id);
-      const isEnd = n.id === (pathNodes ? pathNodes[pathNodes.length-1] : -1);
-      let fill = '#171b25';
-      let stroke = '#242a38';
-      let textColor = '#808a9e';
-      if (onPath && isEnd) {
-        fill = '#fb8d24';
-        stroke = '#fb8d24';
-        textColor = '#0b0d12';
-      } else if (onPath) {
-        stroke = isAnomaly ? '#ff4b4b' : '#35d07f';
-        fill = isAnomaly ? 'rgba(255,75,75,0.15)' : 'rgba(53,208,127,0.15)';
-        textColor = isAnomaly ? '#ff4b4b' : '#35d07f';
-      }
-      svg += `<rect x="${n.x-nodeR}" y="${n.y-nodeR}" width="${nodeR*2}" height="${nodeR*2}" rx="0" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
-      if (n.isLeaf) {
-        svg += `<text x="${n.x}" y="${n.y+4}" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="${textColor}">L</text>`;
-      } else {
-        const fname = forestData && forestData.features[n.feat] ? forestData.features[n.feat].replace('throughput_','tp_').replace('_pct','%') : '?';
-        svg += `<text x="${n.x}" y="${n.y+3}" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="6" fill="${textColor}">${fname.substring(0,5)}</text>`;
-      }
-    });
-
-    svg += '</svg>';
-    return svg;
-  }
-
-  // ── Compute paths for current sample ──
-  function computePaths(sample) {
-    if (!forestData || !sample) return null;
-    const raw = FEATURE_KEYS.map(k => parseFloat(sample[k]) || 0);
-    const scaled = raw.map((x, i) => (x - forestData.scaler.mean[i]) / forestData.scaler.scale[i]);
-    const paths = [];
-    const depths = [];
-    forestData.trees.forEach((tree, i) => {
-      const result = pathLength(tree, scaled);
-      // Collect full path nodes
-      const pathNodes = [];
-      let node = 0;
-      pathNodes.push(node);
-      for (let d = 0; d < result.depth; d++) {
-        const feat = tree.feature[node];
-        if (feat === -2) break;
-        const thr = tree.threshold[node];
-        node = scaled[feat] <= thr ? tree.children_left[node] : tree.children_right[node];
-        pathNodes.push(node);
-      }
-      paths.push(pathNodes);
-      depths.push(result.depth);
-    });
-    const avgDepth = depths.reduce((a,b) => a+b, 0) / depths.length;
-    return { paths, depths, avgDepth, scaled, raw };
-  }
-
-  // ── Render all trees with current path ──
-  function renderTrees(sample) {
-    const grid = document.getElementById('treeGrid');
-    if (!forestData) {
-      grid.innerHTML = '<div class="waiting-overlay">Loading forest structure&hellip;</div>';
-      return;
-    }
-
-    let pathInfo = null;
-    let isAnomaly = false;
-    if (sample) {
-      pathInfo = computePaths(sample);
-      isAnomaly = sample.is_anomaly || false;
-    }
-
-    let html = '';
-    forestData.trees.forEach((tree, i) => {
-      const pathNodes = pathInfo ? pathInfo.paths[i] : null;
-      const depth = pathInfo ? pathInfo.depths[i] : 0;
-      const svg = renderTreeSVG(tree, i, pathNodes, depth, isAnomaly);
-      html += `<div class="tree-card">
-        <div class="tree-card-title">Tree ${i+1}${pathInfo ? ' — depth ' + depth : ''}</div>
-        ${svg}
-      </div>`;
-    });
-    grid.innerHTML = html;
-
-    // Update score summary
-    const summary = document.getElementById('scoreSummary');
-    if (pathInfo && sample && sample.anomaly_score !== null) {
-      summary.style.display = 'block';
-      const n = forestData.max_samples || 256;
-      const cn = 2 * harmonic(n) - 2 * (n - 1) / n;
-      document.getElementById('avgPath').textContent = pathInfo.avgDepth.toFixed(2);
-      document.getElementById('cnVal').textContent = cn.toFixed(4);
-      const scoreEl = document.getElementById('finalScore');
-      scoreEl.textContent = sample.anomaly_score.toFixed(6);
-      scoreEl.className = sample.is_anomaly ? 'verdict-bad' : 'verdict-ok';
-    } else {
-      summary.style.display = 'none';
-    }
-  }
-
-  // ── Animate pipeline stages ──
-  function animatePipeline(sample) {
-    const token = document.getElementById('sampleToken');
-    const track = document.querySelector('.pipeline-track');
-    const stages = document.querySelectorAll('.pipe-stage');
-    const arrows = document.querySelectorAll('.pipe-arrow');
-
-    // Calculate token position
-    // We want it to move from stage 1 to stage 5
-    // Get bounding rects
-    const trackRect = track.getBoundingClientRect();
-    const stageWidth = stages[0].getBoundingClientRect().width;
-    const arrowWidth = 28;
-
-    // Activate stages sequentially with a delay
-    stages.forEach(s => s.classList.remove('active'));
-
-    let currentStage = 0;
-    function advanceStage() {
-      if (currentStage >= stages.length) return;
-      stages[currentStage].classList.add('active');
-
-      // Move token
-      const stageRect = stages[currentStage].getBoundingClientRect();
-      const offset = stageRect.left - trackRect.left + stageRect.width / 2 - 6;
-      token.style.left = offset + 'px';
-
-      currentStage++;
-      if (currentStage < stages.length) {
-        setTimeout(advanceStage, 200);
-      }
-    }
-
-    // Reset token
-    token.style.transition = 'none';
-    token.style.left = '0px';
-    token.offsetHeight; // force reflow
-    token.style.transition = 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-
-    setTimeout(advanceStage, 50);
-  }
-
-  // ── Update Stage 1: Raw ──
-  function updateStage1(sample) {
-    const body = document.getElementById('stage1Body');
-    const tp_tx = (sample.throughput_tx_mbps || 0).toFixed(1);
-    const tp_rx = (sample.throughput_rx_mbps || 0).toFixed(1);
-    const retry = (sample.retry_rate || 0).toFixed(4);
-    const txp = (sample.tx_per_pct || 0).toFixed(1);
-    const rxp = (sample.rx_per_pct || 0).toFixed(1);
-    const bfi = sample.bfi_phi_mean !== null ? `\nBFI: ${sample.bfi_phi_mean !== null ? sample.bfi_phi_mean.toFixed(4) : '—'}` : '';
-    body.innerHTML = `<span class="val">TP_TX: ${tp_tx}</span> Mbps\n<span class="val">TP_RX: ${tp_rx}</span> Mbps\n<span class="val">Retry: ${retry}</span>\n<span class="val">TX_PER: ${txp}%</span>  <span class="val">RX_PER: ${rxp}%</span>\n<span class="val">RSSI: ${sample.rssi0||0}/${sample.rssi1||0}/${sample.rssi2||0}/${sample.rssi3||0}</span>${bfi}`;
-  }
-
-  // ── Update Stage 2: Extract ──
-  function updateStage2(sample) {
-    const body = document.getElementById('stage2Body');
-    let html = '<div class="feat-mini">';
-    FEATURE_KEYS.forEach(k => {
-      const v = sample[k];
-      const display = v !== null && v !== undefined ? (typeof v === 'number' ? v.toFixed(4) : v) : '—';
-      const short = k.replace('throughput_','tp_').replace('_pct','%');
-      html += `<span class="fn">${short}</span><span class="fv">${display}</span>`;
-    });
-    html += '</div>';
-    body.innerHTML = html;
-  }
-
-  // ── Update Stage 3: Scale ──
-  function updateStage3(sample) {
-    const body = document.getElementById('stage3Body');
-    if (!forestData) {
-      body.innerHTML = '<div class="formula">z = (x &minus; &mu;) / &sigma;</div>';
-      return;
-    }
-    let html = '<div style="max-height:180px;overflow-y:auto">';
-    FEATURE_KEYS.forEach((k, i) => {
-      const raw = parseFloat(sample[k]) || 0;
-      const mean = forestData.scaler.mean[i];
-      const scale = forestData.scaler.scale[i];
-      const z = (raw - mean) / scale;
-      const short = k.replace('throughput_','tp_').replace('_pct','%');
-      html += `<div class="scale-row">
-        <span class="feat">${short.substring(0,6)}</span>
-        <span class="raw">${raw.toFixed(2)}</span>
-        <span class="arrow">&rarr;</span>
-        <span class="z">${z.toFixed(3)}</span>
-      </div>`;
-    });
-    html += '</div>';
-    body.innerHTML = html;
-  }
-
-  // ── Update Stage 4: Forest ──
-  function updateStage4(sample) {
-    const body = document.getElementById('stage4Body');
-    if (!forestData) {
-      body.innerHTML = '<div class="waiting-overlay">Loading&hellip;</div>';
-      return;
-    }
-    const info = computePaths(sample);
-    if (!info) return;
-    let html = '';
-    info.depths.forEach((d, i) => {
-      const color = d <= 4 ? 'var(--danger)' : 'var(--ok)';
-      html += `<div style="color:${color}">Tree ${i+1}: depth ${d}</div>`;
-    });
-    html += `<div style="margin-top:4px;color:var(--text)">Avg: <strong>${info.avgDepth.toFixed(2)}</strong></div>`;
-    body.innerHTML = html;
-  }
-
-  // ── Update Stage 5: Score ──
-  function updateStage5(sample) {
-    const body = document.getElementById('stage5Body');
-    if (sample.anomaly_score === null || sample.anomaly_score === undefined) {
-      body.innerHTML = '<div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>';
-      return;
-    }
-    const score = sample.anomaly_score;
-    const isAnom = sample.is_anomaly;
-    const verdictClass = isAnom ? 'verdict-bad' : 'verdict-ok';
-    const verdictText = isAnom ? 'ANOMALY' : 'NORMAL';
-    body.innerHTML = `<div><span class="label">Score:</span> <span class="val">${score.toFixed(6)}</span></div>
-      <div class="formula">s = 2<sup>&minus;E(h)/c(n)</sup></div>
-      <div style="margin-top:6px"><span class="${verdictClass}">${verdictText}</span></div>`;
-  }
-
-  // ── Full update on new sample ──
-  function onSample(sample) {
-    latestSample = sample;
-    updateStage1(sample);
-    updateStage2(sample);
-    updateStage3(sample);
-    updateStage4(sample);
-    updateStage5(sample);
-    renderTrees(sample);
-    animatePipeline(sample);
-  }
-
-  // ── WebSocket ──
-  function connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.onmessage = function(e) {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'meta' || msg.type === 'session' || msg.type === 'log' || msg.type === 'status' || msg.type === 'calib') return;
-        if (msg.anomaly_score !== null && msg.anomaly_score !== undefined) {
-          onSample(msg);
-        }
-      } catch(err) {}
-    };
-    ws.onclose = function() {
-      setTimeout(connectWS, 3000);
-    };
-    ws.onerror = function() {};
-  }
-
-  // ── Init ──
-  loadForest();
-  connectWS();
-
-})();
-</script>
 </body>
 </html>

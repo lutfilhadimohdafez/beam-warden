@@ -95,6 +95,28 @@ def _parse_clients(macs_text: str, arp_text: str) -> list:
     return clients
 
 
+def _mt76_clients(dump_text: str, leases_text: str) -> list:
+    """Clients for the AC2100/mt76: every associated STA from `iw ... station dump`,
+    with IPs from /tmp/dhcp.leases. mt76 has no brctl/br-lan, so the old
+    _parse_clients path returned nothing (header counted stale, zero bars)."""
+    ip_by_mac = {}
+    for ln in (leases_text or "").splitlines():
+        f = ln.split()
+        # dnsmasq lease: "<expiry> <mac> <ip> <hostname> <clientid>"
+        if len(f) >= 3 and f[1].count(":") == 5:
+            ip_by_mac[f[1].lower()] = f[2]
+    clients, seen = [], set()
+    for ln in (dump_text or "").splitlines():
+        s = ln.strip()
+        if s.startswith("Station ") and s.count(":") >= 5:
+            mac = s.split()[1].lower()
+            if mac in seen:
+                continue
+            seen.add(mac)
+            clients.append({"mac": mac, "ip": ip_by_mac.get(mac, ""), "age": ""})
+    return clients
+
+
 def _merge_bfi(msg: dict) -> dict:
     """Fold latest BFI features into *msg* (no-op if BFI_LATEST is empty)."""
     if BFI_LATEST:
@@ -173,7 +195,7 @@ def _build_message(
     tx_nss: int | None,
     tx_bw: str | None,
     tx_phymode: str | None,
-    temp_c: int,
+    temp_c: int | None,
 ) -> dict:
     return {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
@@ -269,7 +291,7 @@ async def _replay_broadcast_current() -> None:
         tx_nss=int(float(row["tx_nss"])) if row.get("tx_nss") else None,
         tx_bw=row.get("tx_bw") or None,
         tx_phymode=row.get("tx_phymode") or None,
-        temp_c=int(float(row["temp_c"])),
+        temp_c=int(float(row["temp_c"])) if row.get("temp_c") else None,
     )
     msg["raw"] = repr(row)
     score, is_anom = score_sample(msg)
@@ -338,20 +360,27 @@ async def _producer_live() -> None:
                 tx_nss=parsed["tx_nss"],
                 tx_bw=parsed["tx_bw"],
                 tx_phymode=parsed["tx_phymode"],
+                # field-availability driven: iwpriv rigs report a real temp; mt76
+                # has no sensor so parsed["temp_c"] is None → the tile shows "N/A".
                 temp_c=parsed["temp_c"],
             )
             msg["raw"] = text
-            # refresh connected-clients list every ~7 ticks on the SAME telnet (no 2nd session)
+            # refresh connected-clients list every ~7 ticks on the SAME conn (no 2nd session)
+            global _latest_clients
             client_ctr += 1
             if client_ctr == 1 or client_ctr % 7 == 0:
                 try:
-                    # ponytail: br-lan is XiaoQiang's LAN bridge (no br0 on this fw).
-                    # Shows all bridged clients (wired eth0 + wl0/wl1). For wl0-only
-                    # stations with per-chain RSSI, parse `iwpriv wl0 show stainfo`->dmesg.
-                    macs = await asyncio.to_thread(ont.run, "brctl showmacs br-lan")
-                    arp = await asyncio.to_thread(ont.run, "cat /proc/net/arp")
-                    global _latest_clients
-                    _latest_clients = _parse_clients(macs, arp)
+                    if mt76:
+                        # mt76/ImmortalWrt: no brctl — list associated STAs from the
+                        # AP station dump we already fetched, IPs from dnsmasq leases.
+                        leases = await asyncio.to_thread(
+                            ont.run, "cat /tmp/dhcp.leases 2>/dev/null")
+                        _latest_clients = _mt76_clients(text, leases)
+                    else:
+                        # ponytail: br-lan is XiaoQiang's LAN bridge (no br0 on this fw).
+                        macs = await asyncio.to_thread(ont.run, "brctl showmacs br-lan")
+                        arp = await asyncio.to_thread(ont.run, "cat /proc/net/arp")
+                        _latest_clients = _parse_clients(macs, arp)
                 except Exception:
                     pass
             msg["clients"] = _latest_clients

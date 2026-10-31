@@ -20,7 +20,9 @@ from pathlib import Path
 # Same key set the dashboard consumes (mirrors parse_iwpriv_stat in
 # gn630v_telemetry.py). Keys with no mt76 source keep their neutral default.
 _DEFAULTS: dict = {
-    "temp_c": 0,
+    # None = this source has no temperature sensor (mt76 station dump) → the
+    # dashboard renders "N/A". iwpriv rigs (GN630v/AX3200) set a real value.
+    "temp_c": None,
     "tx_success": 0, "tx_fail": 0, "tx_per_pct": 0.0,
     "rx_success": 0, "rx_crc": 0, "rx_per_pct": 0.0,
     "rssi0": 0, "rssi1": 0, "rssi2": 0, "rssi3": 0,
@@ -35,8 +37,11 @@ _DEFAULTS: dict = {
 # "signal:  -54 [-62, -58, -63, -58] dBm"  -> combined + per-chain list
 _SIGNAL_RE = re.compile(r"^\s*signal:\s*(-?\d+)\s*\[([^\]]+)\]")
 # "tx bitrate: 433.3 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 1"
+# The bandwidth token (e.g. "80MHz") is OMITTED at 20MHz on mt76 — real AC2100
+# line is "VHT-MCS 8 short GI VHT-NSS 1" — so it must be optional, or the whole
+# rate (MCS/NSS/phymode) fails to parse and the dashboard tile shows nothing.
 _RATE_RE = re.compile(
-    r"(VHT|HE|HT)-MCS\s+(\d+)\s+(\d+MHz)(?:\s+(short|long)\s+GI)?"
+    r"(VHT|HE|HT)-MCS\s+(\d+)(?:\s+(\d+MHz))?(?:\s+(short|long)\s+GI)?"
     r"(?:.*?(?:VHT|HE|HT)-NSS\s+(\d+))?"
 )
 _INT_RE = {
@@ -223,6 +228,10 @@ def demo() -> None:
     assert d["bytes_sent"] == 8498259 and d["bytes_recv"] == 4174231, d
     assert d["tx_fail"] == 203 and d["tx_success"] == 7021, d  # retries drive retry_rate
     assert d["tx_per_pct"] == round(100.0 * 2 / 7021, 3), d
+    # real AC2100 20MHz line OMITS the bandwidth token — must still parse MCS/NSS
+    d20 = parse_iw_station_dump(
+        "\ttx bitrate:\t86.7 MBit/s VHT-MCS 8 short GI VHT-NSS 1\n")
+    assert d20["tx_mcs"] == 8 and d20["tx_nss"] == 1 and d20["tx_bw"] is None, d20
     print("OK")
 
 
