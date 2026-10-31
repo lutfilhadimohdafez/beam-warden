@@ -1897,12 +1897,16 @@ async def _lifespan(app):
 
 
 # ── routes ────────────────────────────────────────────────────────────────
+# no-store so an edited page is actually refetched, never served from browser cache
+_NOCACHE = {"Cache-Control": "no-store, must-revalidate"}
+
+
 async def _homepage(request):
-    return FileResponse(_HERE / "dashboard.html")
+    return FileResponse(_HERE / "dashboard.html", headers=_NOCACHE)
 
 
 async def _ml_page(request):
-    return FileResponse(_HERE / "ml.html")
+    return FileResponse(_HERE / "ml.html", headers=_NOCACHE)
 
 
 async def _ws_handler(websocket: WebSocket) -> None:

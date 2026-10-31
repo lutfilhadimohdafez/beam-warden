@@ -444,6 +444,45 @@
     </div>
   </div>
 
+  <style>
+    .bfid-live { display:flex; flex-direction:column; gap:14px; border-left:4px solid var(--border); transition:border-color .3s; }
+    .bfid-live.normal   { border-left-color: var(--ok); }
+    .bfid-live.attack   { border-left-color: var(--danger); }
+    .bfid-live.standby  { border-left-color: var(--border); }
+    .bfid-live-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:18px; }
+    .bfid-live-eyebrow { font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+    .bfid-live-status { font-size:1.9rem; font-weight:800; letter-spacing:.04em; line-height:1.1; }
+    .bfid-live-status.normal  { color:var(--ok); }
+    .bfid-live-status.attack  { color:var(--danger); animation:bfidpulse 1s ease-in-out infinite; }
+    .bfid-live-status.standby { color:var(--muted); font-size:1.4rem; }
+    @keyframes bfidpulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+    .bfid-live-hint { font-size:.82rem; color:var(--muted); margin-top:3px; max-width:46ch; }
+    .bfid-live-readouts { display:flex; gap:26px; flex-wrap:wrap; }
+    .bfid-live-readouts .ro { display:flex; flex-direction:column; gap:2px; text-align:right; }
+    .bfid-live-readouts .ro-val { font-size:1.5rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+    .bfid-live-readouts .ro-lbl { font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  </style>
+
+  <!-- LIVE DETECTOR -->
+  <div class="section">
+    <div class="section-head">Live detector</div>
+    <div class="section-sub">The current verdict on this network, straight off the detection stream</div>
+    <div class="panel bfid-live standby" id="mlLive">
+      <div class="bfid-live-row">
+        <div>
+          <div class="bfid-live-eyebrow">Live detector</div>
+          <div class="bfid-live-status standby" id="mlStatus">STANDBY</div>
+          <div class="bfid-live-hint" id="mlHint">No BFI feed running &mdash; start monitoring from the Command Center to activate live detection.</div>
+        </div>
+        <div class="bfid-live-readouts">
+          <div class="ro"><div class="ro-val" id="mlRate">&mdash;</div><div class="ro-lbl">BFI / sec</div></div>
+          <div class="ro"><div class="ro-val" id="mlCount">&mdash;</div><div class="ro-lbl">per 2s window</div></div>
+          <div class="ro"><div class="ro-val" id="mlRetry">&mdash;</div><div class="ro-lbl">RETRY=1</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- WHAT IT DETECTS -->
   <div class="section">
     <div class="section-head">What it detects</div>
@@ -566,6 +605,17 @@
         attacker who omits the RETRY=1 marker cannot inject forgeries without raising the rate, so they do
         not evade detection.
       </p>
+      <p class="body-text" style="margin-top:14px;">
+        <strong>Why RandomForest now, not IsolationForest?</strong> The earlier design ran an
+        <strong>IsolationForest</strong> (unsupervised outlier detector) over an 11-value link-telemetry
+        vector (throughput, RSSI, PER, retry, MCS&hellip;). That signal was weak &mdash; on a strong close link
+        PER stayed flat and RSSI drift confounded everything, so it was dropped. The signal moved to the
+        <strong>BFI storm</strong> (the attack's own on-air frames), which separates cleanly, so the lab
+        <em>proof</em> uses a supervised <strong>RandomForest</strong> reporting accuracy. Note the irony:
+        the <em>deployed</em> engine keeps IsolationForest's better instinct &mdash; learn normal, flag
+        deviation, no attack labels &mdash; because a real defender has no labelled attacks. It is
+        calibrate-and-threshold, run on the signal that actually moves.
+      </p>
     </div>
   </div>
 
@@ -595,9 +645,11 @@
         condition</strong> &mdash; one ~6-minute capture, two 20-second attack bursts, one distance / channel /
         traffic load. <strong>Cross-condition generalisation is untested</strong> and is the honest next step
         (&ge; 3 captures across different days / distances / channels / loads, reported as held-out-capture
-        accuracy). Packaging the engine as an on-box OpenWrt service is future work &mdash; detection needs a
-        monitor-mode capture, which the AC2100's mt7615 can't expose alongside its AP, so today it runs on the
-        laptop's monitor NIC beside the AP.
+        accuracy). The engine is now packaged as a standalone OpenWrt service
+        (<span class="val">openwrt/beamwarden</span> &mdash; busybox + tcpdump, no python/sklearn): it
+        self-calibrates a per-network baseline and alerts on a surge. The one thing to confirm on first
+        flash is whether the AP chipset surfaces its own received sounding frames in a monitor vif; the
+        proven path today runs the detector on the laptop's monitor NIC beside the AP.
       </p>
     </div>
   </div>
@@ -620,5 +672,58 @@
   </div>
 
 </div>
+
+<script>
+/* Live detector: subscribe to the same /ws bfi_detect stream the dashboard uses.
+   Shows STANDBY until a feed is running, then NORMAL / ATTACK with live numbers. */
+(function () {
+  var panel = document.getElementById("mlLive"),
+      statusEl = document.getElementById("mlStatus"),
+      hintEl = document.getElementById("mlHint"),
+      rateEl = document.getElementById("mlRate"),
+      cntEl = document.getElementById("mlCount"),
+      retryEl = document.getElementById("mlRetry"),
+      last = 0;
+
+  function set(cls, txt, hint) {
+    panel.className = "panel bfid-live " + cls;
+    statusEl.className = "bfid-live-status " + cls;
+    statusEl.textContent = txt;
+    if (hint !== undefined) hintEl.innerHTML = hint;
+  }
+  function dashes() { rateEl.textContent = cntEl.textContent = retryEl.textContent = "—"; }
+
+  function connect() {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + location.host + "/ws");
+    ws.onmessage = function (e) {
+      var d; try { d = JSON.parse(e.data); } catch (_) { return; }
+      if (d.type !== "bfi_detect") return;
+      last = Date.now();
+      var attack = d.verdict === "attack";
+      rateEl.textContent = (d.bfi_rate != null ? d.bfi_rate : "—");
+      cntEl.textContent = (d.bfi_rate != null ? Math.round(d.bfi_rate * 2) : "—");
+      retryEl.textContent = (d.retry1_count != null ? d.retry1_count : "—");
+      set(attack ? "attack" : "normal",
+          attack ? "ATTACK" : "NORMAL",
+          attack ? "Forgery storm &mdash; on-air BFI rate spiked above this network's normal."
+                 : "On-air BFI rate is at this network's learned baseline.");
+    };
+    ws.onclose = function () { setTimeout(connect, 2000); };
+    ws.onerror = function () { try { ws.close(); } catch (_) {} };
+  }
+
+  /* watchdog: no verdict for 4s => no feed is running */
+  setInterval(function () {
+    if (Date.now() - last > 4000) {
+      set("standby", "STANDBY",
+          "No BFI feed running &mdash; start monitoring from the Command Center to activate live detection.");
+      dashes();
+    }
+  }, 1000);
+
+  connect();
+})();
+</script>
 </body>
 </html>
