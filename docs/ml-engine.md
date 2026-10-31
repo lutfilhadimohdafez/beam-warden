@@ -58,28 +58,35 @@ learns the *shape* of an attack, not one rig's numbers.
 
 ---
 
-## 3. The model
+## 3. The model — trained offline, RUNS ON THE ROUTER
 
-**RandomForest** (self-calibrated relative features), evaluated **leave-one-RUN-out**
+**RandomForest** on self-calibrated relative features, evaluated **leave-one-RUN-out**
 (hold out a whole capture run → the "works on a network it never saw" number).
 
 - **OBJ3 target: ≥55 %.**
-- **Achieved: 82.1 %** leave-one-run-out across 4 real runs / 126 samples.
-- Per-held-out-run: **[100, 48, 80, 100]**. Top features: **tx_PER, throughput, retry**.
+- **Laptop RF (analysis, 5 metrics incl. rx_per):** 83.6 % across 5 real runs / 160 samples.
+- **Exported on-router model (4 metrics: retry/PER/throughput/RSSI):** **80.1 %**,
+  per-held-out-run **[100, 68, 77, 100, 56]**. Top features: **tx_PER, throughput, retry**.
 
-Train offline (`tools/train_telemetry.py`); the forest's decision is **distilled to
-calibrated thresholds** the on-router package runs (no sklearn on the router).
+**The learned model ships ON the router** — not a threshold. `tools/export_model.py`
+trains a compact forest (60 trees, depth 8) and **code-generates it to an `awk`
+tree-walk** (`model.awk`, ~13 KB). `beamwarden watch` builds the 8 relative features
+from `iw station dump` and runs `model.awk` for each verdict — the real forest, no
+python/sklearn on the router. Verified: `awk` reproduces sklearn 160/160, and on the
+AC2100 `beamwarden status` reports `engine=ML-forest`. (A retry/PER threshold remains
+as a fallback only if `model.awk` is absent.)
 
 ---
 
 ## 4. Results & honest status
 
-- ✅ Meets OBJ3 (82.1 % ≥ 55 %) on *unseen-run* data, adapter-free.
-- ⚠️ **The 48 % fold** is the one noisy low-power run — the **covert-attack
+- ✅ Meets OBJ3 (**80.1 %** ≥ 55 %) on *unseen-run* data, adapter-free, with the ML
+  engine genuinely running on the router.
+- ⚠️ **The ~56 % worst fold** is the noisy low-power run — the **covert-attack
   weakness**: when the attack doesn't degrade the link, telemetry barely moves.
   Documented, not hidden. Catching the forged frames directly would fix it but needs
   monitor mode (not portable) — the deliberate tradeoff for universal deployability.
-- ⚠️ 4 runs on one rig; more conditions (distance/channel/load/hardware) would
+- ⚠️ 5 runs on one rig; more conditions (distance/channel/load/**hardware**) would
   shrink that fold — the outstanding rigor work.
 
 ---
@@ -89,11 +96,13 @@ calibrated thresholds** the on-router package runs (no sklearn on the router).
 | File | Role |
 |---|---|
 | `tools/mt76_capture.py` / `tools/obj1_run.py` | collect labelled `iw station dump` telemetry (normal/attack) |
-| `tools/train_telemetry.py` | self-calibrated features → RandomForest → leave-one-run-out accuracy |
-| `openwrt/beamwarden/` | the standalone OpenWrt package: `calibrate` + `watch` on-router, adapter-free |
-| `tools/dashboard.py` + `dashboard.html` | live telemetry tiles (retry/PER/throughput/RSSI) = the live detection view |
+| `tools/train_telemetry.py` | self-calibrated features → RandomForest → leave-one-run-out accuracy (analysis) |
+| `tools/export_model.py` | trains the compact forest → **code-gens `model.awk`** (the on-router engine) |
+| `openwrt/beamwarden/` | standalone OpenWrt package: `calibrate` + `watch` + `model.awk` + `on_alert` (Telegram), adapter-free |
+| `tools/attack_report.py` | forensic incident report (PNG/PDF) + Telegram push |
+| `tools/dashboard.py` + `dashboard.html` | live telemetry tiles + Telegram settings panel |
 
-**Reproduce the number:**
-`.venv/bin/python tools/train_telemetry.py data/obj1_*.csv data/real_aba_*.csv`
+**Reproduce the number / rebuild the on-router model:**
+`.venv/bin/python tools/export_model.py data/obj1_*.csv data/real_aba_*.csv`
 
 **Deploy on any router:** `opkg install beamwarden_*.ipk` → `beamwarden calibrate` → `beamwarden watch`.
