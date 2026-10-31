@@ -1485,7 +1485,6 @@
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="command-center">Command Center</button>
     <button class="tab-btn" data-tab="learning">Learning</button>
-    <a href="/ml" class="nav-link" style="margin-left:auto;">ML Engine &rarr;</a>
   </div>
 
   <!-- ======== DASHBOARD TAB ======== -->
@@ -1676,9 +1675,9 @@
         <div class="mc-param">
           <label>Bandwidth</label>
           <select id="mcBw" style="width:100%;">
-            <option value="80">80 MHz</option>
+            <option value="20" selected>20 MHz</option>
             <option value="40">40 MHz</option>
-            <option value="20">20 MHz</option>
+            <option value="80">80 MHz</option>
           </select>
         </div>
         <div class="mc-param">
@@ -1686,7 +1685,7 @@
             <button type="button" id="mcScanAps"
               style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan AP</button>
           </label>
-          <input id="mcAp" value="5c:02:14:b0:34:13" placeholder="5c:02:14:b0:34:13">
+          <input id="mcAp" value="5c:02:14:0e:e1:c5" placeholder="5c:02:14:0e:e1:c5">
           <select id="mcApList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
         </div>
         <div class="mc-param">
@@ -1694,12 +1693,12 @@
             <button type="button" id="mcScanVictims"
               style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan air</button>
           </label>
-          <input id="mcVictim" value="fe:40:39:4d:6d:da" placeholder="fe:40:39:4d:6d:da">
+          <input id="mcVictim" value="16:0f:02:1d:91:42" placeholder="16:0f:02:1d:91:42">
           <select id="mcVictimList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
         </div>
         <div class="mc-param">
           <label>Victim IP (iperf3 -s)</label>
-          <input id="mcVictimIp" value="192.168.31.158" placeholder="192.168.31.158">
+          <input id="mcVictimIp" value="192.168.1.105" placeholder="192.168.1.105">
         </div>
         <div class="mc-param">
           <label>Attack Load Cap (Mbps)</label>
