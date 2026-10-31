@@ -561,8 +561,12 @@ def _bfi_verdict(events, now: float, window: float = BFI_WINDOW_S) -> dict:
         "type": "bfi_detect",
         "ts": round(now, 3),
         "bfi_rate": round(rate, 2),
+        "bfi_count": cnt,
         "retry1_count": retry1,
         "score": round(score, 3),
+        "threshold": round(BFI_THRESHOLD, 2),   # frames/sec tipping point (midpoint)
+        "normal_hi": round(BFI_NORMAL_HI, 2),
+        "attack_lo": round(BFI_ATTACK_LO, 2),
         "verdict": "attack" if rate >= BFI_THRESHOLD else "normal",
     }
 

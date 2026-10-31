@@ -503,41 +503,76 @@
   <div class="section">
     <div class="section-head">How it works</div>
     <div class="section-sub">Count the victim's BFI frames per 2-second window, compare to this network's normal</div>
+    <style>
+      .ps-live { margin-top:12px; padding-top:10px; border-top:1px dashed var(--border); }
+      .ps-live-eyebrow { font-size:.6rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; display:flex; align-items:center; gap:6px; }
+      .ps-dot { width:7px; height:7px; border-radius:50%; background:var(--border); flex:none; }
+      .pipe-stage.active .ps-dot { background:var(--ok); box-shadow:0 0 6px var(--ok); }
+      .pipe-stage.alarm  .ps-dot { background:var(--danger); box-shadow:0 0 6px var(--danger); }
+      .ps-live-val { font-size:1.35rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; line-height:1.15; }
+      .ps-live-sub { font-size:.7rem; color:var(--muted); margin-top:2px; }
+      .ps-bar { position:relative; height:9px; border-radius:5px; background:var(--border); overflow:hidden; margin:7px 0 5px; }
+      .ps-bar-fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--ok); transition:width .4s ease, background .3s; border-radius:5px; }
+      .pipe-stage.alarm .ps-bar-fill { background:var(--danger); }
+      .ps-bar-tick { position:absolute; top:-2px; bottom:-2px; left:50%; width:2px; background:var(--text); opacity:.55; }
+      .ps-verdict { font-size:1.5rem; font-weight:800; letter-spacing:.03em; }
+      .ps-verdict.normal { color:var(--ok); }
+      .ps-verdict.attack { color:var(--danger); animation:bfidpulse 1s ease-in-out infinite; }
+      .ps-verdict.standby { color:var(--muted); font-size:1.1rem; }
+    </style>
     <div class="panel pipeline-wrap">
       <div class="pipeline-track">
-        <div class="pipe-stage">
+        <div class="pipe-stage" id="ps1">
           <div class="pipe-stage-num">Stage 1</div>
           <div class="pipe-stage-title">Sniff</div>
           <div class="pipe-stage-body">
             Monitor the victim's VHT compressed-beamforming frames on air.<br><br>
             <span class="formula">category_code == 21<br>sa == victim MAC</span>
           </div>
+          <div class="ps-live">
+            <div class="ps-live-eyebrow"><span class="ps-dot"></span><span id="ps1State">no feed</span></div>
+            <div class="ps-live-sub">live capture off the air</div>
+          </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage">
+        <div class="pipe-stage" id="ps2">
           <div class="pipe-stage-num">Stage 2</div>
           <div class="pipe-stage-title">Count</div>
           <div class="pipe-stage-body">
             Per 2-second window, tally how many BFI frames arrived and how many carry
             <span class="val">RETRY=1</span>.
           </div>
+          <div class="ps-live">
+            <div class="ps-live-eyebrow"><span class="ps-dot"></span>this window</div>
+            <div class="ps-live-val"><span id="ps2Count">&mdash;</span> <span style="font-size:.75rem;color:var(--muted);font-weight:500;">frames</span></div>
+            <div class="ps-live-sub"><span id="ps2Rate">&mdash;</span>/s &middot; RETRY=1: <span id="ps2Retry">&mdash;</span></div>
+          </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage">
+        <div class="pipe-stage" id="ps3">
           <div class="pipe-stage-num">Stage 3</div>
           <div class="pipe-stage-title">Compare</div>
           <div class="pipe-stage-body">
             Is the rate above <span class="val">this place's learned normal</span>? Forged
             injection cannot help but push the rate up.
           </div>
+          <div class="ps-live">
+            <div class="ps-live-eyebrow"><span class="ps-dot"></span>rate vs threshold</div>
+            <div class="ps-bar"><div class="ps-bar-fill" id="ps3Fill"></div><div class="ps-bar-tick" title="attack threshold"></div></div>
+            <div class="ps-live-sub"><span id="ps3Rate">&mdash;</span>/s &nbsp;|&nbsp; tips at <span id="ps3Thr">&mdash;</span>/s</div>
+          </div>
         </div>
         <div class="pipe-arrow">&rarr;</div>
-        <div class="pipe-stage">
+        <div class="pipe-stage" id="ps4">
           <div class="pipe-stage-num">Stage 4</div>
           <div class="pipe-stage-title">Verdict</div>
           <div class="pipe-stage-body">
             <span class="verdict-ok">NORMAL</span> &mdash; rate at baseline.<br>
             <span class="verdict-bad">ATTACK</span> &mdash; rate spiked above normal.
+          </div>
+          <div class="ps-live">
+            <div class="ps-live-eyebrow"><span class="ps-dot"></span>right now</div>
+            <div class="ps-verdict standby" id="ps4Verdict">STANDBY</div>
           </div>
         </div>
       </div>
@@ -693,6 +728,40 @@
   }
   function dashes() { rateEl.textContent = cntEl.textContent = retryEl.textContent = "—"; }
 
+  /* ---- Stage 1->4 pipeline, driven live ---- */
+  var stages = ["ps1", "ps2", "ps3", "ps4"].map(function (id) { return document.getElementById(id); }),
+      ps1State = document.getElementById("ps1State"),
+      ps2Count = document.getElementById("ps2Count"),
+      ps2Rate = document.getElementById("ps2Rate"),
+      ps2Retry = document.getElementById("ps2Retry"),
+      ps3Fill = document.getElementById("ps3Fill"),
+      ps3Rate = document.getElementById("ps3Rate"),
+      ps3Thr = document.getElementById("ps3Thr"),
+      ps4Verdict = document.getElementById("ps4Verdict");
+
+  function pipeLive(d) {
+    var attack = d.verdict === "attack";
+    stages.forEach(function (s) { s.className = "pipe-stage active" + (attack ? " alarm" : ""); });
+    ps1State.textContent = "listening";
+    ps2Count.textContent = (d.bfi_count != null ? d.bfi_count : Math.round(d.bfi_rate * 2));
+    ps2Rate.textContent = d.bfi_rate;
+    ps2Retry.textContent = d.retry1_count;
+    ps3Fill.style.width = Math.round((d.score != null ? d.score : 0) * 100) + "%";
+    ps3Rate.textContent = d.bfi_rate;
+    ps3Thr.textContent = (d.threshold != null ? d.threshold : "—");
+    ps4Verdict.className = "ps-verdict " + (attack ? "attack" : "normal");
+    ps4Verdict.textContent = attack ? "ATTACK" : "NORMAL";
+  }
+  function pipeStandby() {
+    stages.forEach(function (s) { s.className = "pipe-stage"; });
+    ps1State.textContent = "no feed";
+    ps2Count.textContent = ps2Rate.textContent = ps2Retry.textContent = "—";
+    ps3Fill.style.width = "0%";
+    ps3Rate.textContent = "—";
+    ps4Verdict.className = "ps-verdict standby";
+    ps4Verdict.textContent = "STANDBY";
+  }
+
   function connect() {
     var proto = location.protocol === "https:" ? "wss:" : "ws:";
     var ws = new WebSocket(proto + "//" + location.host + "/ws");
@@ -708,6 +777,7 @@
           attack ? "ATTACK" : "NORMAL",
           attack ? "Forgery storm &mdash; on-air BFI rate spiked above this network's normal."
                  : "On-air BFI rate is at this network's learned baseline.");
+      pipeLive(d);
     };
     ws.onclose = function () { setTimeout(connect, 2000); };
     ws.onerror = function () { try { ws.close(); } catch (_) {} };
@@ -719,6 +789,7 @@
       set("standby", "STANDBY",
           "No BFI feed running &mdash; start monitoring from the Command Center to activate live detection.");
       dashes();
+      pipeStandby();
     }
   }, 1000);
 
