@@ -1,0 +1,32 @@
+#!/bin/sh
+# Beam-Warden alert hook — pushes a Telegram message when `beamwarden watch`
+# detects an attack. Called as: on_alert <retry_rate> <per_rate>
+#
+# The router sends this itself (just an HTTPS POST to the Telegram Bot API) — no PC,
+# no server, no polling. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in
+# /etc/beamwarden.conf (get the token from @BotFather; empty = alerts off).
+# ponytail: one curl. Needs +curl +ca-bundle (HTTPS to api.telegram.org).
+CONF=/etc/beamwarden.conf
+[ -f "$CONF" ] && . "$CONF"
+[ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || exit 0
+
+# rate-limit: at most one Telegram per TELEGRAM_COOLDOWN s (default 60) so a
+# sustained attack doesn't spam the chat. Guard via a timestamp file (works
+# across separate hook invocations, unlike a trailing sleep).
+STAMP=/tmp/beamwarden.last_alert
+COOLDOWN="${TELEGRAM_COOLDOWN:-60}"
+now=$(date +%s)
+last=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((now - last)) -lt "$COOLDOWN" ] && exit 0
+echo "$now" > "$STAMP"
+
+HOST=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo router)
+MSG="Beam-Warden ALERT - beamforming attack detected on ${HOST}
+retry=${1:-?}  PER=${2:-?}  (threshold exceeded, ${HITS_TO_ALARM:-3} windows)
+$(date '+%Y-%m-%d %H:%M:%S %Z')
+Protected client: ${MAC:-all stations}"
+
+curl -s --max-time 10 \
+  "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+  --data-urlencode "text=${MSG}" >/dev/null 2>&1

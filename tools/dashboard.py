@@ -1914,6 +1914,59 @@ async def _ml_page(request):
     return FileResponse(_HERE / "ml.html", headers=_NOCACHE)
 
 
+def _valid_tg(token: str, chat: str) -> bool:
+    """Validate Telegram token/chat_id format (also blocks shell-injection via the
+    SSH save, since only these chars are allowed)."""
+    tok_ok = bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]+", token)) if token else True
+    chat_ok = bool(re.fullmatch(r"-?\d+|@[A-Za-z0-9_]{3,}", chat)) if chat else True
+    return tok_ok and chat_ok
+
+
+async def _telegram_test(request: Request) -> JSONResponse:
+    """Send a test message via the Telegram Bot API (from this dashboard host)."""
+    body = await request.json()
+    token = (body.get("token") or "").strip()
+    chat = (body.get("chat_id") or "").strip()
+    if not token or not chat or not _valid_tg(token, chat):
+        return JSONResponse({"ok": False, "error": "valid token and chat_id required"}, status_code=400)
+    import urllib.parse, urllib.request
+    data = urllib.parse.urlencode({
+        "chat_id": chat,
+        "text": "Beam-Warden test alert - your Telegram alerts are wired up correctly."}).encode()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    def _send():
+        with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10) as r:
+            return r.getcode()
+    try:
+        code = await asyncio.to_thread(_send)
+        return JSONResponse({"ok": code == 200})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+
+
+async def _telegram_save(request: Request) -> JSONResponse:
+    """Write TELEGRAM_* into the router's /etc/beamwarden.conf over SSH, so the
+    on-router alert hook picks them up (restart beamwarden to apply)."""
+    body = await request.json()
+    token = (body.get("token") or "").strip()
+    chat = (body.get("chat_id") or "").strip()
+    if not _valid_tg(token, chat):
+        return JSONResponse({"ok": False, "error": "token or chat_id format invalid"}, status_code=400)
+    cmd = ("sed -i '/^TELEGRAM_BOT_TOKEN=/d; /^TELEGRAM_CHAT_ID=/d' /etc/beamwarden.conf 2>/dev/null; "
+           f"printf 'TELEGRAM_BOT_TOKEN=%s\\nTELEGRAM_CHAT_ID=%s\\n' '{token}' '{chat}' >> /etc/beamwarden.conf; "
+           "/etc/init.d/beamwarden restart 2>/dev/null; echo saved")
+
+    def _save():
+        with SSHConn(args.host, args.user, args.password) as c:
+            return c.run(cmd)
+    try:
+        out = await asyncio.to_thread(_save)
+        return JSONResponse({"ok": "saved" in (out or "")})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+
+
 async def _ws_handler(websocket: WebSocket) -> None:
     await websocket.accept()
     clients.add(websocket)
@@ -1979,6 +2032,8 @@ app = Starlette(
     routes=[
         Route("/", _homepage),
         Route("/ml", _ml_page),
+        Route("/telegram/test", _telegram_test, methods=["POST"]),
+        Route("/telegram/save", _telegram_save, methods=["POST"]),
         Route("/tasks", _tasks_endpoint),
         Route("/replay-files", _replay_files_endpoint),
         Route("/session", _session_endpoint, methods=["POST"]),

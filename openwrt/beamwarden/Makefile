@@ -15,7 +15,7 @@ define Package/beamwarden
   CATEGORY:=Network
   TITLE:=Beam-Warden beamforming-attack detector (telemetry, adapter-free)
   URL:=https://beamwarden.coldcollectives.my
-  DEPENDS:=+iw
+  DEPENDS:=+iw +curl +ca-bundle
   PKGARCH:=all
 endef
 
@@ -35,6 +35,7 @@ define Package/beamwarden/install
 	$(INSTALL_DIR) $(1)/usr/bin $(1)/etc/init.d $(1)/etc/beamwarden
 	$(INSTALL_BIN) ./files/beamwarden.sh   $(1)/usr/bin/beamwarden
 	$(INSTALL_BIN) ./files/beamwarden.init $(1)/etc/init.d/beamwarden
+	$(INSTALL_BIN) ./files/on_alert        $(1)/etc/beamwarden/on_alert
 	$(INSTALL_CONF) ./files/beamwarden.conf $(1)/etc/beamwarden.conf
 endef
 

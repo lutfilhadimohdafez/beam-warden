@@ -1660,6 +1660,52 @@
   <!-- ======== COMMAND CENTER TAB ======== -->
   <div class="tab-section" id="tab-command-center">
 
+    <!-- TELEGRAM ALERTS -->
+    <div class="section-label stagger">TELEGRAM ALERTS <span id="tgStatus" style="font-family:var(--font-mono);font-size:0.56rem;font-weight:600;letter-spacing:0.04em;margin-left:8px;color:var(--muted-dim);">not saved</span></div>
+    <div class="mc-section stagger">
+      <div class="mc-params">
+        <div class="mc-param">
+          <label>Bot Token <span class="mc-hint">from @BotFather</span></label>
+          <input id="tgToken" type="password" placeholder="123456:ABC-DEF...">
+        </div>
+        <div class="mc-param">
+          <label>Chat ID <span class="mc-hint">numeric id, or @channel</span></label>
+          <input id="tgChat" placeholder="123456789">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+        <button type="button" id="tgTest" style="font-family:var(--font-mono);font-size:0.6rem;padding:5px 12px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:4px;">Send test alert</button>
+        <button type="button" id="tgSave" style="font-family:var(--font-mono);font-size:0.6rem;padding:5px 12px;cursor:pointer;background:var(--ok,#35d07f);color:#111;border:none;border-radius:4px;">Save to router</button>
+        <span id="tgResult" style="font-family:var(--font-mono);font-size:0.6rem;"></span>
+      </div>
+      <div class="mc-hint" style="margin-top:6px;">The router sends alerts itself (HTTPS to Telegram &mdash; no PC needed). <b>Save</b> writes the keys into the router's <code>/etc/beamwarden.conf</code> and restarts the watcher; <b>Test</b> sends a message now to verify.</div>
+    </div>
+    <script>
+    (function () {
+      var tok = document.getElementById("tgToken"), chat = document.getElementById("tgChat"),
+          res = document.getElementById("tgResult"), st = document.getElementById("tgStatus");
+      function post(path) {
+        res.textContent = "…"; res.style.color = "var(--muted)";
+        return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: tok.value.trim(), chat_id: chat.value.trim() }) })
+          .then(function (r) { return r.json(); });
+      }
+      document.getElementById("tgTest").onclick = function () {
+        post("/telegram/test").then(function (d) {
+          res.textContent = d.ok ? "test sent — check Telegram" : ("failed: " + (d.error || ""));
+          res.style.color = d.ok ? "var(--ok)" : "var(--danger)";
+        }).catch(function () { res.textContent = "error"; res.style.color = "var(--danger)"; });
+      };
+      document.getElementById("tgSave").onclick = function () {
+        post("/telegram/save").then(function (d) {
+          res.textContent = d.ok ? "saved to router + watcher restarted" : ("failed: " + (d.error || ""));
+          res.style.color = d.ok ? "var(--ok)" : "var(--danger)";
+          if (d.ok && st) { st.textContent = "saved"; st.style.color = "var(--ok)"; }
+        }).catch(function () { res.textContent = "error"; res.style.color = "var(--danger)"; });
+      };
+    })();
+    </script>
+
     <!-- MISSION CONTROL -->
     <div class="section-label stagger">MISSION CONTROL <span id="mcMonStatus" style="font-family:var(--font-mono);font-size:0.56rem;font-weight:600;letter-spacing:0.04em;margin-left:8px;color:var(--muted-dim);"></span></div>
     <div class="mc-section stagger">
