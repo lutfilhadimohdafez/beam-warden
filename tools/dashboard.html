@@ -392,6 +392,10 @@
   .clients-row .cdev { color: var(--muted-dim); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.56rem; align-self: center; }
   .clients-row .cip { color: var(--muted); margin-left: auto; }
   .clients-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted-dim); padding: 4px 8px; }
+  /* unavailable-feature marker (themed, no emoji) */
+  .section-hint { font-family: var(--font-mono); font-size: 0.55rem; color: var(--muted-dim); font-weight: 400; letter-spacing: 0; }
+  .tile.tile-na .tile-value, .tile.tile-na .tile-label { color: var(--muted-dim); }
+  .tile-na-icon { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border: 1px solid var(--muted-dim); border-radius: 50%; margin-right: 5px; font-size: 9px; line-height: 1; color: var(--muted-dim); font-family: var(--font-mono); vertical-align: middle; cursor: help; }
   .bfi-viz { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 8px 4px; }
   .bfi-gauge { text-align: center; }
   .bfi-gsvg { width: 108px; height: 70px; display: block; }
@@ -1580,40 +1584,20 @@
           <div class="bfid-spark-cap">BFI rate &middot; last 60s</div>
         </div>
       </div>
-      <div class="detect-panel stagger">
-        <div class="detect-status offline" id="detectStatus">STANDBY</div>
-        <div class="detect-score-wrap">
-          <div class="detect-score-val" id="detectScoreVal">&mdash;</div>
-          <div class="detect-score-caption">VICTIM BFI FRAMES / SEC<br>A SPIKE = FORGED-FEEDBACK ATTACK</div>
-        </div>
-      </div>
-      <div class="section-label stagger">TELEMETRY</div>
+      <div class="section-label stagger">TELEMETRY <span class="section-hint" id="telemetryHint"></span></div>
       <div class="tiles stagger">
-        <div class="tile">
-          <div class="tile-label">TX Throughput</div>
-          <div class="tile-value"><span id="valTxTput">-</span><span class="tile-unit"> Mbps</span></div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">Retry Rate</div>
-          <div class="tile-value" id="valRetry">-</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">TX PER</div>
-          <div class="tile-value"><span id="valTxPer">-</span><span class="tile-unit">%</span></div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">RSSI 0</div>
-          <div class="tile-value"><span id="valRssi">-</span><span class="tile-unit"> dBm</span></div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">TX MCS</div>
-          <div class="tile-value" id="valMcs">-</div>
-          <div class="tile-sub" id="valMcsSub"></div>
-        </div>
-        <div class="tile" id="tileTemp">
-          <div class="tile-label">Temp</div>
-          <div class="tile-value"><span id="valTemp">-</span><span class="tile-unit" id="valTempUnit">&deg;C</span></div>
-        </div>
+        <div class="tile"><div class="tile-label">TX Throughput</div><div class="tile-value"><span id="valTxTput">-</span></div></div>
+        <div class="tile"><div class="tile-label">RX Throughput</div><div class="tile-value"><span id="valRxTput">-</span></div></div>
+        <div class="tile"><div class="tile-label">Retry Rate</div><div class="tile-value"><span id="valRetry">-</span></div></div>
+        <div class="tile"><div class="tile-label">TX PER</div><div class="tile-value"><span id="valTxPer">-</span></div></div>
+        <div class="tile"><div class="tile-label">RX PER</div><div class="tile-value"><span id="valRxPer">-</span></div></div>
+        <div class="tile"><div class="tile-label">RSSI 0</div><div class="tile-value"><span id="valRssi0">-</span></div></div>
+        <div class="tile"><div class="tile-label">RSSI 1</div><div class="tile-value"><span id="valRssi1">-</span></div></div>
+        <div class="tile"><div class="tile-label">RSSI 2</div><div class="tile-value"><span id="valRssi2">-</span></div></div>
+        <div class="tile"><div class="tile-label">RSSI 3</div><div class="tile-value"><span id="valRssi3">-</span></div></div>
+        <div class="tile"><div class="tile-label">TX MCS</div><div class="tile-value"><span id="valMcs">-</span></div><div class="tile-sub" id="valMcsSub"></div></div>
+        <div class="tile"><div class="tile-label">TX NSS</div><div class="tile-value"><span id="valNss">-</span></div></div>
+        <div class="tile"><div class="tile-label">Temp</div><div class="tile-value"><span id="valTemp">-</span></div></div>
       </div>
       <div class="section-label stagger" id="clientsLabel">CLIENTS CONNECTED &middot; <span id="clientsCount">0</span></div>
       <div class="clients-list stagger" id="clientsList">
@@ -2443,6 +2427,25 @@
     ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
   }
 
+  /* One telemetry tile. value present -> number (+unit); null/NaN (field not
+     provided by this hardware) -> themed "unavailable" marker + tooltip. Returns
+     1 when unavailable (for the "N unavailable" hint), else 0. Rig-agnostic. */
+  function setTile(id, value, disp, unit) {
+    var el = document.getElementById(id);
+    if (!el) return 0;
+    var box = el.parentElement ? el.parentElement.parentElement : null; /* .tile */
+    var na = (value === null || value === undefined ||
+              (typeof value === "number" && isNaN(value)));
+    if (na) {
+      el.innerHTML = '<span class="tile-na-icon" title="Not available on this hardware">!</span>N/A';
+      if (box && box.classList) box.classList.add("tile-na");
+      return 1;
+    }
+    el.innerHTML = disp + (unit ? '<span class="tile-unit">' + unit + '</span>' : '');
+    if (box && box.classList) box.classList.remove("tile-na");
+    return 0;
+  }
+
   function handleBfiDetect(d) {
     var attack = d.verdict === "attack";
     bfidAttack = attack;
@@ -2461,10 +2464,6 @@
       if (bfidSpark.length > 60) bfidSpark.shift();
     }
     drawBfidSpark();
-    /* plain-language mirror in the top detect panel (BFI-driven, not the old model) */
-    $detectStatus.className = "detect-status " + (attack ? "attack" : "normal");
-    $detectStatus.textContent = attack ? "ATTACK DETECTED" : "NORMAL";
-    $detectScoreVal.textContent = fx(d.bfi_rate, 1);
     /* feed the repurposed right-column chart with the real live BFI rate */
     if (chartAnomaly && typeof d.bfi_rate === "number" && !isNaN(d.bfi_rate)) {
       rollingPush(chartAnomaly.data.labels, new Date().toLocaleTimeString());
@@ -2533,16 +2532,22 @@
 
     /* existing telemetry handling below */
 
-    $valTxTput.textContent = fxTput(d.throughput_tx_mbps);
-    $valRetry.textContent  = fx(d.retry_rate, 3);
-    $valTxPer.textContent  = fx(d.tx_per_pct, 2);
-    $valRssi.textContent   = (d.rssi0 === null || d.rssi0 === undefined) ? "—" : d.rssi0;
-    /* Temp: availability-driven. iwpriv rigs (GN630v/AX3200) send a real value;
-       a source with no sensor (mt76) sends null -> "N/A" instead of a fake 0. */
-    var _tempNA = (d.temp_c === null || d.temp_c === undefined);
-    $valTemp.textContent = _tempNA ? "N/A" : d.temp_c;
-    var _tempUnit = document.getElementById("valTempUnit");
-    if (_tempUnit) _tempUnit.style.display = _tempNA ? "none" : "";
+    /* TELEMETRY — router-agnostic: value present -> number; a field this hardware
+       does not provide (null, or 0 for an unused RSSI chain) -> a themed
+       "unavailable" marker (not a fake 0, not a silent gap). Any rig that provides
+       a field lights it up (same on GN630v / AX3200 / AC2100). */
+    var _na = 0;
+    _na += setTile("valTxTput", d.throughput_tx_mbps, fxTput(d.throughput_tx_mbps), " Mbps");
+    _na += setTile("valRxTput", d.throughput_rx_mbps, fxTput(d.throughput_rx_mbps), " Mbps");
+    _na += setTile("valRetry",  d.retry_rate, fx(d.retry_rate, 3), "");
+    _na += setTile("valTxPer",  d.tx_per_pct, fx(d.tx_per_pct, 2), "%");
+    _na += setTile("valRxPer",  d.rx_per_pct, fx(d.rx_per_pct, 2), "%");
+    _na += setTile("valRssi0",  (d.rssi0 || null), d.rssi0, " dBm");
+    _na += setTile("valRssi1",  (d.rssi1 || null), d.rssi1, " dBm");
+    _na += setTile("valRssi2",  (d.rssi2 || null), d.rssi2, " dBm");
+    _na += setTile("valRssi3",  (d.rssi3 || null), d.rssi3, " dBm");
+    _na += setTile("valNss",    d.tx_nss, d.tx_nss, "SS");
+    _na += setTile("valTemp",   d.temp_c, d.temp_c, "°C");
 
     /* BFI / CSI panel (only update if data present) */
     if (d.bfi_phi_mean !== null && d.bfi_phi_mean !== undefined) {
@@ -2550,16 +2555,18 @@
     }
 
     if (d.tx_mcs !== null && d.tx_mcs !== undefined) {
-      $valMcs.textContent = d.tx_mcs;
+      setTile("valMcs", d.tx_mcs, String(d.tx_mcs), "");
       var sub = [];
-      if (d.tx_nss !== null)     sub.push(d.tx_nss + "SS");
-      if (d.tx_bw !== null)      sub.push(d.tx_bw);
-      if (d.tx_phymode !== null) sub.push(d.tx_phymode);
-      $valMcsSub.textContent = sub.join(" \u00B7 ");
+      if (d.tx_nss != null)      sub.push(d.tx_nss + "SS");
+      if (d.tx_bw != null)       sub.push(d.tx_bw);
+      if (d.tx_phymode != null)  sub.push(d.tx_phymode);
+      if ($valMcsSub) $valMcsSub.textContent = sub.join(" \u00B7 ");
     } else {
-      $valMcs.textContent = "-";
-      $valMcsSub.textContent = "";
+      _na += setTile("valMcs", null, "", "");
+      if ($valMcsSub) $valMcsSub.textContent = "";
     }
+    var _hint = document.getElementById("telemetryHint");
+    if (_hint) _hint.textContent = _na ? ("\u00B7 " + _na + " unavailable on this hardware") : "";
 
     setMode(d.mode);
 
