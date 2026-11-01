@@ -331,8 +331,10 @@ def _telemetry_verdict(retry, per, tput, rssi_list, ont):
     rssi = (sum(rssi) / len(rssi)) if rssi else -60.0
     rm, rsd, pm, psd, tm, tsd, rsm, rssd = _RIG_BASELINE
     e = 1e-6
+    # model features: retry/PER/RSSI (throughput dropped - demand-confounded; still
+    # used above for the idle gate)
     feats = [retry / (rm + e), (retry - rm) / (rsd + e), per / (pm + e), (per - pm) / (psd + e),
-             tput / (tm + e), (tput - tm) / (tsd + e), rssi / (rsm + e), (rssi - rsm) / (rssd + e)]
+             rssi / (rsm + e), (rssi - rsm) / (rssd + e)]
     try:
         r = subprocess.run(["awk", "-f", str(_MODEL_AWK)],
                            input=" ".join(f"{v:.6g}" for v in feats) + "\n",

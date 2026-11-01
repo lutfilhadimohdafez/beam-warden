@@ -91,11 +91,11 @@ cmd_watch() {
 			verdict=0; hits=0        # link idle -> nothing to attack; don't evaluate
 		elif [ $use_model = 1 ]; then
 			# 8 relative features in model order, then walk the forest
-			verdict=$(awk -v r=$r -v p=$p -v t=$t -v rssi=$rssi \
-				-v rm=$rm -v rsd=$rsd -v pm=$pm -v psd=$psd -v tm=$tm -v tsd=$tsd -v rsm=$rsm -v rssd=$rssd 'BEGIN{
-				e=1e-6; printf "%.6g %.6g %.6g %.6g %.6g %.6g %.6g %.6g\n",
-					r/(rm+e),(r-rm)/(rsd+e), p/(pm+e),(p-pm)/(psd+e),
-					t/(tm+e),(t-tm)/(tsd+e), rssi/(rsm+e),(rssi-rsm)/(rssd+e) }' | awk -f "$MODEL")
+			# model features: retry/PER/RSSI (throughput dropped - demand-confounded)
+			verdict=$(awk -v r=$r -v p=$p -v rssi=$rssi \
+				-v rm=$rm -v rsd=$rsd -v pm=$pm -v psd=$psd -v rsm=$rsm -v rssd=$rssd 'BEGIN{
+				e=1e-6; printf "%.6g %.6g %.6g %.6g %.6g %.6g\n",
+					r/(rm+e),(r-rm)/(rsd+e), p/(pm+e),(p-pm)/(psd+e), rssi/(rsm+e),(rssi-rsm)/(rssd+e) }' | awk -f "$MODEL")
 		else
 			thr=$(awk -v b=$rm -v m=$RETRY_MULT -v fl=$RETRY_FLOOR 'BEGIN{x=b*m; if(x<fl)x=fl; print x}')
 			verdict=$(awk -v r=$r -v thr=$thr 'BEGIN{print (r>thr)?1:0}')

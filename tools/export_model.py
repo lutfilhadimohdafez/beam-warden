@@ -21,9 +21,12 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 EPS = 1e-6
-METRICS = ["retry_rate", "tx_per_pct", "throughput_tx_mbps", "rssi"]
-FEATS = ["retry_ratio", "retry_z", "per_ratio", "per_z",
-         "tput_ratio", "tput_z", "rssi_ratio", "rssi_z"]
+# Throughput DROPPED: it is demand-dependent (light normal traffic looks like a
+# "collapse" vs a heavy-load baseline -> false alarms). retry/PER are failure RATES
+# (demand-robust); RSSI adds per-chain context. Trained WITH varied-normal so the
+# model knows normal's full load range.
+METRICS = ["retry_rate", "tx_per_pct", "rssi"]
+FEATS = ["retry_ratio", "retry_z", "per_ratio", "per_z", "rssi_ratio", "rssi_z"]
 N_TREES, MAX_DEPTH = 60, 8
 
 
