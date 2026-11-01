@@ -290,25 +290,30 @@ TASK_REGISTRY: dict[str, dict] = {
     "throughput_test": {
         "label": "BeamCraft Attack — Burst Throughput (A/B/A)",
         "cmd": [
-            # sys.executable = the venv python (has telnet/3.14 deps); an absolute
-            # path survives pkexec's reset PATH, unlike bare "python".
+            # sys.executable = the venv python; an absolute path survives pkexec's
+            # reset PATH, unlike bare "python".
             # -u: force unbuffered stdout. stdbuf (in dashboard _run_task) only
             # line-buffers libc stdio; Python does its OWN block-buffering over a
             # pipe, and pkexec strips PYTHONUNBUFFERED, so the console stayed EMPTY
             # until the run finished. -u is an argv flag -> survives pkexec.
-            sys.executable, "-u", str(_TOOLS / "aba_throughput.py"),
+            #
+            # 2026-11-01: repointed from aba_throughput.py (GN630V telnet/iwpriv
+            # ONLY — "connection refused" on the AC2100) to obj1_run.py, the proven
+            # SSH/mt76 A/B/A path (SSHConn + aba_mt76). obj1_run reads host/user/
+            # pass/iface/bssid/victim/channel from rig.conf by default, so the GUI
+            # only needs to pass mon/alpha/out. --no-phone-start: the dashboard's
+            # demo_live.sh already starts iperf3 on the phone.
+            sys.executable, "-u", str(_TOOLS / "obj1_run.py"),
             "--mon", "{mon}",
-            "--ap", "{ap}",
-            "--victim", "{victim}",
-            "--victim-ip", "{victim_ip}",
-            "--bitrate", "{bitrate}",  # 0 = unleash (full channel, no load cap)
             "--alpha", "{alpha}",  # attack strength passed to main_su (0=off .. 1=max)
+            "--no-phone-start",
             "--out", str(_ROOT / "results" / "sessions" / "{run}_tput.csv"),
         ],
         "privileged": True,
-        "description": "OFF->ON->OFF downlink throughput measurement vs the attack. "
-                       "Load Cap blank/0 = unleash (full channel); set Mbps to cap. "
-                       "Needs iperf3 -s on the phone (Victim IP) + mon0 hearing.",
+        "description": "OFF->ON->OFF downlink throughput measurement vs the attack "
+                       "(SSH/mt76 path, obj1_run.py). Reads the rig from rig.conf; "
+                       "needs mon0 hearing + iperf3 -s on the phone (run demo_live.sh "
+                       "or Setup Monitor first).",
     },
     "train_detector": {
         "label": "Validate Detector (OBJ3)",

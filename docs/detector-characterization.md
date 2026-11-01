@@ -53,3 +53,24 @@ detector is clean. For a reliable exhibition demo:
 4. Dashboard panel flips **ATTACK** + Telegram alert from the router.
 
 The calibrate→attack gap is seconds, so the baseline matches current RF → clean detection.
+
+## Running it entirely from the GUI (for a supervisor demo)
+The whole chain is driveable from the dashboard — no terminal needed in front of an audience:
+1. **Dashboard** tab → pick the **ImmortalWrt AC2100 (mt76)** profile → **CONNECT** (live telemetry = OBJ2).
+2. **Command Center** tab → **Setup Monitor** (pkexec) builds `mon0` on the Alfa, auto-detects
+   the AP channel, and runs a deaf-card check.
+3. Fresh calibrate (`tools/demo_live.sh`, or the Learning-tab calibrate) — keep the
+   calibrate→fire gap to *seconds* (the drift rule above).
+4. **Command Center** → **BeamCraft Attack — Burst Throughput (A/B/A)** → **Run** (pkexec).
+   Watch the detector panel flip **ATTACK** + the router's Telegram alert.
+
+Verified live on the AC2100 (2026-11-01) firing from the GUI Run button: **66.3 % downlink drop**
+(31.3 → 10.5 Mbps), detector fired `ALERT beamforming-attack` during the attack window, Telegram
+alert stamped on the router. OBJ1 + OBJ2 + OBJ3 all shown from the browser.
+
+> **Transport gotcha (fixed 2026-11-01).** The GUI attack task (`throughput_test` in
+> `tools/tasks.py`) originally called `aba_throughput.py`, which only speaks the **GN630V
+> telnet/iwpriv** path and dies with `cannot reach AP: Connection refused` on an mt76/SSH router
+> like the AC2100. It now calls `tools/obj1_run.py` (the proven `SSHConn` + `aba_mt76` path),
+> reading the rig from `rig.conf`. Any future mt76-only rig works through the GUI unchanged; a
+> stock-MediaTek GN630v rig still fires via the terminal `obj1_auto.py`/`aba_throughput.py` route.
