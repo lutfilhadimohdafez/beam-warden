@@ -11,6 +11,13 @@ _TOOLS = Path(__file__).resolve().parent
 _BINARY = _ROOT / "BeamCraft_AE" / "main_su"
 
 TASK_REGISTRY: dict[str, dict] = {
+    "live_demo": {
+        "label": "Guided Live Demo",
+        "cmd": [sys.executable, "-u", str(_TOOLS / "live_demo.py"),
+                "--mon", "{mon}", "--power", "{demo_power}"],
+        "privileged": True,
+        "description": "Check the phone, set demo power, freshly calibrate, start the router watcher, then run bounded measured attack bursts. Restores AP power to auto.",
+    },
     "test_echo": {
         "label": "Test Echo",
         "cmd": ["echo", "hello-mission-control"],

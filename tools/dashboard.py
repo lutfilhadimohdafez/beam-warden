@@ -306,27 +306,59 @@ async def _replay_broadcast_current() -> None:
 
 # ── producer: live mode ───────────────────────────────────────────────────
 _RIG_BASELINE: list | None = None
+DEMO_PROGRESS = {"type": "demo", "stage": "idle", "message": "Connect the configured router, then start the guided live demo.", "alert": False}
+_DEMO_CONFLICTS = {"live_demo", "setup_monitor", "reset_monitor", "recover_monitor", "restore_intel", "capture_bfi", "start_attack", "throughput_test"}
 _MODEL_AWK = Path(__file__).resolve().parent.parent / "openwrt" / "beamwarden" / "files" / "model.awk"
 
 
-def _telemetry_verdict(retry, per, tput, rssi_list, ont):
+def _router_detector_state(ont):
+    """Read the watcher's actual latest decision, separately from local estimates."""
+    try:
+        raw = ont.run(". /etc/beamwarden.conf; if /etc/init.d/beamwarden running >/dev/null 2>&1; then echo running; else echo stopped; fi; date +%s; echo ${WIN:-2}; if [ -n \"${TRACE_FILE:-}\" ]; then tail -n 1 \"$TRACE_FILE\" 2>/dev/null; fi; true")
+        lines = raw.splitlines()
+        if not lines or lines[0] != 'running':
+            return {'state': 'stopped'}
+        if len(lines) < 4:
+            return {'state': 'unavailable'}
+        row = lines[3].split(',')
+        if len(row) != 11:
+            return {'state': 'unavailable'}
+        age = int(lines[1]) - int(row[0])
+        if age < -2 or age > max(10, 3 * int(lines[2])):
+            return {'state': 'stale', 'age': age}
+        reason, verdict, hits, alarm = row[6], row[7], int(row[8]), row[9] == '1'
+        state = ('idle' if reason == 'below_activity_gate' else
+                 'error' if reason == 'model_error' else
+                 'attack' if alarm else 'suspect' if verdict == '1' else
+                 'normal' if verdict == '0' else 'error')
+        return {'state': state, 'reason': reason, 'hits': hits, 'alarm': alarm,
+                'timestamp': int(row[0]), 'age': age, 'attempts': int(row[5]),
+                'retry': float(row[1]), 'per': float(row[2]), 'throughput': float(row[3])}
+    except Exception:
+        return {'state': 'unavailable'}
+
+
+def _telemetry_verdict(retry, per, tput, rssi_list, ont, active_packets=None):
     """Run the SHIPPED ML forest (model.awk) on live telemetry vs the router's
     calibrated baseline -> 'attack' / 'normal' / 'idle' / None. Same engine the
-    router runs; the dashboard just mirrors the verdict on the detector panel."""
+    router runs; this local estimate can differ in timing/station selection from
+    the watcher. Router-alert evidence is reported separately by the demo runner."""
     global _RIG_BASELINE
     if not _MODEL_AWK.exists():
         return None
-    if _RIG_BASELINE is None:
-        try:
-            parts = ont.run("cat /var/run/beamwarden.base 2>/dev/null").split()
-            _RIG_BASELINE = [float(x) for x in parts[:8]] if len(parts) >= 8 else []
-        except Exception:
-            return None
+    try:
+        lines = ont.run("cat /var/run/beamwarden.base 2>/dev/null; . /etc/beamwarden.conf; echo ${ACTIVE_MIN_PKTS:-3000}").splitlines()
+        parts = lines[0].split() if len(lines) >= 2 else []
+        _RIG_BASELINE = [float(x) for x in parts] if len(parts) == 8 else []
+        min_packets = int(lines[-1])
+    except Exception:
+        _RIG_BASELINE = None
+        return None
     if not _RIG_BASELINE:
         return None
     retry, per, tput = retry or 0.0, per or 0.0, tput or 0.0
-    if tput < 15.0:            # GATE-TO-LOAD: only score under substantial load (mirrors
-        return "idle"          # the router's frames-attempted gate; light/idle not scored)
+    if active_packets is None or active_packets < min_packets:
+        return "idle"
     rssi = [v for v in rssi_list if v is not None]
     rssi = (sum(rssi) / len(rssi)) if rssi else -60.0
     rm, rsd, pm, psd, tm, tsd, rsm, rssd = _RIG_BASELINE
@@ -339,7 +371,7 @@ def _telemetry_verdict(retry, per, tput, rssi_list, ont):
         r = subprocess.run(["awk", "-f", str(_MODEL_AWK)],
                            input=" ".join(f"{v:.6g}" for v in feats) + "\n",
                            capture_output=True, text=True, timeout=3)
-        return "attack" if r.stdout.strip() == "1" else "normal"
+        return {"1": "attack", "0": "normal"}.get(r.stdout.strip()) if r.returncode == 0 else None
     except Exception:
         return None
 
@@ -429,11 +461,25 @@ async def _producer_live() -> None:
             msg["anomaly_score"] = score
             msg["is_anomaly"] = is_anom
             # telemetry ML verdict (the shipped forest) -> detector panel
-            msg["detect_verdict"] = _telemetry_verdict(
-                deltas.get("retry_rate", 0.0), parsed.get("tx_per_pct", 0.0),
+            attempts = None
+            per_window = 0.0
+            if prev is not None:
+                packets = parsed["packets_sent"] - prev["packets_sent"]
+                retries = parsed["tx_fail"] - prev["tx_fail"]
+                failures = parsed.get("tx_failed", 0) - prev.get("tx_failed", 0)
+                if min(packets, retries, failures) >= 0:
+                    attempts = packets + retries
+                    per_window = failures / max(1, packets + failures)
+            msg["detect_verdict"] = await asyncio.to_thread(_telemetry_verdict,
+                deltas.get("retry_rate", 0.0), per_window,
                 deltas.get("throughput_tx_mbps", 0.0),
                 [parsed.get("rssi0"), parsed.get("rssi1"), parsed.get("rssi2"), parsed.get("rssi3")],
-                ont)
+                ont, attempts)
+            msg["detect_source"] = "dashboard_estimate"
+            if mt76:
+                msg["router_detector"] = await asyncio.to_thread(_router_detector_state, ont)
+            if DEMO_PROGRESS.get("stage") in ("authorising", "checking", "preparing", "calibrating"):
+                msg["detect_verdict"] = None
             await _broadcast(msg)
 
             prev = parsed
@@ -462,6 +508,7 @@ async def _producer_live() -> None:
                 tx_phymode=None,
                 temp_c=0,
             )
+            err_msg["detect_verdict"] = None
             await _broadcast(err_msg)
             if ont is not None:
                 try:
@@ -742,6 +789,29 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     params = body if isinstance(body, dict) else {}
+    if name in _DEMO_CONFLICTS:
+        busy = [n for n in _DEMO_CONFLICTS if TASK_STATE.get(n, {}).get("state") == "running"]
+        if (name == "live_demo" and busy) or "live_demo" in busy:
+            return JSONResponse({"error": "Stop the running radio/demo task first: " + ", ".join(busy)}, status_code=409)
+    if name == "live_demo":
+        if LAST_SESSION.get("source") != "live" or getattr(args, "driver", "") != "mt76":
+            return JSONResponse({"error": "Connect the router in Live mode using the OpenWrt / mt76 profile first."}, status_code=409)
+        if any(getattr(args, field, None) != RIG[key] for field, key in
+               (("host", "ROUTER_HOST"), ("user", "ROUTER_USER"), ("iface", "ROUTER_AP_IFACE"))):
+            return JSONResponse({"error": "Connected router differs from rig.conf. Select the configured demo router first."}, status_code=409)
+        try:
+            power = int(str(params.get("demo_power", 550)))
+            if not 0 <= power <= 2000:
+                raise ValueError
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "Demo power must be an integer from 0 to 2000 mBm."}, status_code=400)
+        mon = params.get("mon", "mon0")
+        if not isinstance(mon, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,15}", mon):
+            return JSONResponse({"error": "Invalid monitor interface."}, status_code=400)
+        params = {"mon": mon, "demo_power": str(power)}
+        DEMO_PROGRESS.clear()
+        DEMO_PROGRESS.update(type="demo", stage="authorising", message="Approve the desktop administrator prompt to begin.", alert=False)
+        await _broadcast(DEMO_PROGRESS)
     # default a run-id (empty {run} → "_air.pcap"); ensure the capture dir exists
     if not params.get("run"):
         params["run"] = time.strftime("%Y%m%d_%H%M%S")
@@ -753,7 +823,10 @@ async def _run_endpoint(request: Request) -> JSONResponse:
     params.setdefault("alpha", "1.0")  # attack strength; 1.0 = current behavior (A/B/A repro)
     (Path(__file__).resolve().parent.parent / "results" / "sessions").mkdir(parents=True, exist_ok=True)
 
-    cmd = resolve_cmd(name, params)
+    try:
+        cmd = resolve_cmd(name, params)
+    except (KeyError, ValueError):
+        return JSONResponse({"error": "Missing or invalid task parameters"}, status_code=400)
     if cmd is None:
         return JSONResponse({"error": "failed to resolve command"}, status_code=500)
 
@@ -780,11 +853,20 @@ async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
     # never be stopped from the browser.
     await _broadcast({"type": "status", "task": name, "state": "running", "code": None})
 
-    proc = await asyncio.create_subprocess_exec(
-        *proc_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *proc_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        TASK_STATE[name] = {"state": "failed", "pid": None, "code": -1}
+        if name == "live_demo":
+            DEMO_PROGRESS.update(stage="failed", message=str(exc))
+            await _broadcast(DEMO_PROGRESS)
+        await _broadcast({"type": "log", "task": name, "stream": "err", "line": str(exc)})
+        await _broadcast({"type": "status", "task": name, "state": "failed", "code": -1})
+        return
     TASK_STATE[name]["pid"] = proc.pid
 
     async def _read_stream(stream, label: str):
@@ -793,6 +875,13 @@ async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
             if not line:
                 break
             text = line.decode("utf-8", errors="replace").rstrip("\n")
+            if name == "live_demo" and text.startswith("BW_DEMO "):
+                try:
+                    progress = json.loads(text[len("BW_DEMO "):])
+                    DEMO_PROGRESS.update(progress, type="demo")
+                    await _broadcast(DEMO_PROGRESS)
+                except (ValueError, TypeError):
+                    pass
             msg = {"type": "log", "task": name, "stream": label, "line": text}
             await _broadcast(msg)
 
@@ -801,6 +890,9 @@ async def _run_task(name: str, cmd: list[str], privileged: bool) -> None:
         _read_stream(proc.stderr, "err"),
     )
     code = await proc.wait()
+    if name == "live_demo" and code != 0 and DEMO_PROGRESS.get("stage") not in ("failed", "stopped"):
+        DEMO_PROGRESS.update(stage="failed", message="Demo did not finish. Check the console and administrator prompt.")
+        await _broadcast(DEMO_PROGRESS)
     state = "done" if code == 0 else "failed"
     TASK_STATE[name] = {"state": state, "pid": None, "code": code}
     status_msg = {"type": "status", "task": name, "state": state, "code": code}
@@ -819,6 +911,18 @@ async def _stop_endpoint(request: Request) -> JSONResponse:
     st = TASK_STATE.get(name, {"state": "idle", "pid": None, "code": None})
     if st["state"] != "running":
         return JSONResponse({"error": f"task {name} not running"}, status_code=409)
+    if name == "live_demo":
+        pid = st.get("pid")
+        if not pid:
+            return JSONResponse({"error": "Process is starting; try Stop again in a moment."}, status_code=409)
+        try:
+            killer = await asyncio.create_subprocess_exec("pkexec", "kill", "-TERM", str(int(pid)))
+            code = await asyncio.wait_for(killer.wait(), timeout=25)
+            if code:
+                raise RuntimeError("Stop was not authorised")
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        return JSONResponse({"ok": True, "task": name})
 
     # ponytail: root-kill for privileged tasks (ported from attack_gui).
     # MUST be non-blocking: a blocking subprocess.run() here froze the whole
@@ -921,6 +1025,8 @@ async def _session_endpoint(request: Request) -> JSONResponse:
     global _current_task
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
+    if TASK_STATE.get("live_demo", {}).get("state") == "running":
+        return JSONResponse({"error": "Stop the guided demo before switching sessions."}, status_code=409)
     try:
         body = await request.json()
     except Exception:
@@ -1008,6 +1114,8 @@ async def _session_stop(request: Request) -> JSONResponse:
     global _current_task
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
+    if TASK_STATE.get("live_demo", {}).get("state") == "running":
+        return JSONResponse({"error": "Stop the guided demo before disconnecting."}, status_code=409)
     # Cancel existing producer (ponytail: small copy, not worth abstracting)
     if _current_task is not None and not _current_task.done():
         _current_task.cancel()
@@ -1677,6 +1785,8 @@ async def _monitor_setup(request: Request) -> JSONResponse:
     """POST /monitor-setup — set iface to monitor mode via pkexec (privileged)."""
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
+    if TASK_STATE.get("live_demo", {}).get("state") == "running":
+        return JSONResponse({"error": "Stop the guided demo first."}, status_code=409)
     try:
         body = await request.json()
     except Exception:
@@ -1722,6 +1832,8 @@ async def _bfi_start(request: Request) -> JSONResponse:
     """POST /bfi-start {iface} — start the BFI capture on an iface already in monitor mode."""
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
+    if TASK_STATE.get("live_demo", {}).get("state") == "running":
+        return JSONResponse({"error": "Stop the guided demo first."}, status_code=409)
     try:
         body = await request.json()
     except Exception:
@@ -1831,6 +1943,8 @@ async def _shutdown(request: Request) -> JSONResponse:
     global _current_task
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
+    if TASK_STATE.get("live_demo", {}).get("state") == "running":
+        return JSONResponse({"error": "Stop the guided demo first."}, status_code=409)
     # Stop BFI stream
     _stop_bfi()
     # Cancel current producer
@@ -1921,6 +2035,7 @@ async def _lifespan(app):
         _current_task = asyncio.create_task(_producer_replay())
     elif args.mode == "live":
         _current_task = asyncio.create_task(_producer_live())
+        await _set_session("live", f"live: {args.host}@{args.iface}")
 
     # Optionally start BFI stream (PARALLEL to iwpriv poll)
     if getattr(args, "bfi_iface", None):
@@ -2030,6 +2145,7 @@ async def _ws_handler(websocket: WebSocket) -> None:
     # sync a tab that connects LATER: replay the current session + task states
     # so its Connect button / task chips match reality instead of booting stale.
     await websocket.send_text(json.dumps(LAST_SESSION))
+    await websocket.send_text(json.dumps(DEMO_PROGRESS))
     for _tname, _tst in TASK_STATE.items():
         await websocket.send_text(json.dumps({
             "type": "status", "task": _tname,

@@ -16,7 +16,7 @@ import csv
 import time
 from pathlib import Path
 
-from mt76_telemetry import SSHConn, parse_iw_station_dump
+from mt76_telemetry import SSHConn, parse_iw_station_dump, window_metrics
 from gn630v_telemetry import compute_deltas
 from rig import RIG  # rig.conf creds, not hardcoded
 
@@ -27,6 +27,7 @@ FIELDS = [
     "rssi0", "rssi1", "rssi2", "rssi3", "tx_mcs", "tx_nss",
     # raw counters kept for re-derivation / provenance
     "bytes_sent", "bytes_recv", "packets_sent", "packets_recv", "tx_fail",
+    "tx_failed", "feature_schema", "sample_seconds", "tx_failure_fraction", "active_attempts",
 ]
 
 
@@ -34,6 +35,10 @@ def run(a: argparse.Namespace) -> None:
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     is_new = not out.exists()
+    if not is_new:
+        with out.open() as existing:
+            if next(csv.reader(existing), []) != FIELDS:
+                raise ValueError('Existing CSV uses a different schema; choose a new output file')
     prev = prev_t = None
     n = 0
     with SSHConn(a.host, a.user, a.password) as c, out.open("a", newline="") as f:
@@ -46,11 +51,14 @@ def run(a: argparse.Namespace) -> None:
               f"-> {out}")
         while True:
             t0 = time.time()
-            cur = parse_iw_station_dump(c.run(f"iw dev {a.iface} station dump"))
+            cur = parse_iw_station_dump(c.run(f"iw dev {a.iface} station dump"), RIG['VICTIM_MAC'])
             now = time.time()
             if prev is not None and prev_t is not None:
                 dt = now - prev_t
-                d = compute_deltas(prev, cur, dt) if dt > 0 else {}
+                try:
+                    d = window_metrics(prev, cur, dt)
+                except ValueError:
+                    d = {}
                 if d:
                     row = {
                         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S",
@@ -59,13 +67,14 @@ def run(a: argparse.Namespace) -> None:
                         "throughput_tx_mbps": d["throughput_tx_mbps"],
                         "throughput_rx_mbps": d["throughput_rx_mbps"],
                         "retry_rate": d["retry_rate"],
-                        "tx_per_pct": cur["tx_per_pct"], "rx_per_pct": cur["rx_per_pct"],
+                        "tx_per_pct": d["tx_per_pct"], "rx_per_pct": cur["rx_per_pct"],
                         "rssi0": cur["rssi0"], "rssi1": cur["rssi1"],
                         "rssi2": cur["rssi2"], "rssi3": cur["rssi3"],
                         "tx_mcs": cur["tx_mcs"], "tx_nss": cur["tx_nss"],
                         "bytes_sent": cur["bytes_sent"], "bytes_recv": cur["bytes_recv"],
                         "packets_sent": cur["packets_sent"],
                         "packets_recv": cur["packets_recv"], "tx_fail": cur["tx_fail"],
+                        **{k: d[k] for k in ('tx_failed','feature_schema','sample_seconds','tx_failure_fraction','active_attempts')},
                     }
                     w.writerow(row)
                     f.flush()

@@ -29,13 +29,27 @@ ACTIVE_MIN_PKTS="${ACTIVE_MIN_PKTS:-3000}"  # GATE-TO-LOAD: only evaluate under
                                      # matters and separates only under real load. Tune
                                      # to ~a third of your heavy-load frames/window.
 RETRY_MULT="${RETRY_MULT:-1.5}"      # fallback threshold only (no model.awk)
+LOAD_GRACE_WINDOWS="${LOAD_GRACE_WINDOWS:-0}" # opt-in candidate: retain evidence of recent load
+ACTIVE_FLOOR_PKTS="${ACTIVE_FLOOR_PKTS:-100}" # idle windows are always excluded
 RETRY_FLOOR="${RETRY_FLOOR:-0.30}"   # fallback threshold only
 MODEL="${MODEL:-/etc/beamwarden/model.awk}"
 STATE=/var/run/beamwarden.base
 ALERT_HOOK=/etc/beamwarden/on_alert
 TMP=/tmp/bw_cal.$$
+TRACE_FILE="${TRACE_FILE:-}"       # optional bounded diagnostic CSV (last 120 windows)
 
 log() { logger -t beamwarden "$@"; }
+
+trace_window() {
+	[ -n "$TRACE_FILE" ] || return 0
+	# No credentials or frame contents. Bound storage and replace atomically so a
+	# reader never observes a partial row. Trace failure must not stop detection.
+	local tmp="${TRACE_FILE}.$$"
+	{ [ ! -f "$TRACE_FILE" ] || tail -n 119 "$TRACE_FILE"
+	  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+	    "$(date +%s)" "$r" "$p" "$t" "$rssi" "$act" "$reason" "$verdict" "$trace_hits" "$alarm" "$use_model"
+	} > "$tmp" && mv "$tmp" "$TRACE_FILE"
+}
 
 # aggregate counters for the target station(s): "retries packets failed txbytes rssi"
 # rssi = mean of the per-chain values in the `signal:` line.
@@ -87,11 +101,21 @@ cmd_watch() {
 	: ${rm:=0.05} ${rsd:=0.02} ${pm:=0.02} ${psd:=0.02} ${tm:=20} ${tsd:=10} ${rsm:=-60} ${rssd:=5}
 	local use_model=0; [ -f "$MODEL" ] && use_model=1
 	log "watching $AP_IF (engine=$([ $use_model = 1 ] && echo ML-forest || echo threshold), mac=${MAC:-all})"
-	local hits=0 r p t rssi act verdict thr
+	local hits=0 r p t rssi act verdict thr reason trace_hits alarm load_left=0 eligible
 	while :; do
 		set -- $(sample); r=$1 p=$2 t=$3 rssi=$4 act=$5
-		if [ "${act:-0}" -lt "$ACTIVE_MIN_PKTS" ]; then
+		alarm=0; trace_hits=0; reason=scored
+		eligible=0
+		if [ "${act:-0}" -ge "$ACTIVE_MIN_PKTS" ]; then
+			eligible=1; load_left=$LOAD_GRACE_WINDOWS
+		elif [ "${act:-0}" -ge "$ACTIVE_FLOOR_PKTS" ] && [ "$load_left" -gt 0 ]; then
+			eligible=1; load_left=$((load_left-1)); reason=recent_load
+		else
+			load_left=0
+		fi
+		if [ "$eligible" = 0 ]; then
 			verdict=0; hits=0        # link idle -> nothing to attack; don't evaluate
+			reason=below_activity_gate
 		elif [ $use_model = 1 ]; then
 			# 8 relative features in model order, then walk the forest
 			# model features: retry/PER/throughput/RSSI (throughput is valid here -
@@ -107,14 +131,18 @@ cmd_watch() {
 		fi
 		if [ "$verdict" = "1" ]; then
 			hits=$((hits+1))
+			trace_hits=$hits
 			if [ $hits -ge $HITS_TO_ALARM ]; then
+				alarm=1
 				log "ALERT beamforming-attack: retry=$r PER=$p tput=${t}M rssi=$rssi mac=${MAC:-all}"
-				[ -x "$ALERT_HOOK" ] && "$ALERT_HOOK" "$r" "$p" &
+				[ -x "$ALERT_HOOK" ] && "$ALERT_HOOK" "$r" "$p" "$t" &
 				hits=0
 			fi
 		else
 			hits=0
+			case "$verdict" in 0) ;; *) reason=model_error ;; esac
 		fi
+		trace_window
 	done
 }
 

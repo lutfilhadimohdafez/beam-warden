@@ -1,32 +1,59 @@
 #!/bin/sh
-# Beam-Warden alert hook — pushes a Telegram message when `beamwarden watch`
-# detects an attack. Called as: on_alert <retry_rate> <per_rate>
+# Beam-Warden alert hook — pushes a Telegram incident report when `beamwarden watch`
+# detects an attack. Called as: on_alert <retry_rate> <per_rate> <throughput_mbps>
 #
 # The router sends this itself (just an HTTPS POST to the Telegram Bot API) — no PC,
 # no server, no polling. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in
 # /etc/beamwarden.conf (get the token from @BotFather; empty = alerts off).
-# ponytail: one curl. Needs +curl +ca-bundle (HTTPS to api.telegram.org).
+# The message mirrors tools/attack_report.py's SECURITY INCIDENT REPORT so the
+# chat alert reads the same as the PDF we generate offline.
+# ponytail: one curl + one awk for the deltas. Needs +curl +ca-bundle (HTTPS).
 CONF=/etc/beamwarden.conf
 [ -f "$CONF" ] && . "$CONF"
+[ "${NOTIFY_ENABLED:-1}" = "1" ] || exit 0
 [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || exit 0
 
 # rate-limit: at most one Telegram per TELEGRAM_COOLDOWN s (default 60) so a
-# sustained attack doesn't spam the chat. Guard via a timestamp file (works
-# across separate hook invocations, unlike a trailing sleep).
+# sustained attack doesn't spam the chat.
 STAMP=/tmp/beamwarden.last_alert
 COOLDOWN="${TELEGRAM_COOLDOWN:-60}"
 now=$(date +%s)
 last=$(cat "$STAMP" 2>/dev/null || echo 0)
 [ $((now - last)) -lt "$COOLDOWN" ] && exit 0
-echo "$now" > "$STAMP"
+
+# Derive impact + severity from this window vs the calibrated baseline, the same
+# way the incident report does: retry Nx normal, downlink drop %, HIGH/MEDIUM/INFO.
+# baseline cols: retry_mean retry_std per_mean per_std tput_mean tput_std rssi...
+STATE="${STATE:-/var/run/beamwarden.base}"
+cr="${1:-0}"; cp="${2:-0}"; ct="${3:-0}"
+set -- $(cat "$STATE" 2>/dev/null)
+br="${1:-0}"; bt="${5:-0}"
+eval "$(awk -v cr="$cr" -v ct="$ct" -v br="$br" -v bt="$bt" 'BEGIN{
+  drop = (bt>0) ? 100*(bt-ct)/bt : 0
+  rx   = (br>0) ? cr/br : 0
+  sev  = (drop>=40 || rx>=3) ? "HIGH" : ((cr>br*1.3 || (bt>0 && ct<bt*0.85)) ? "MEDIUM" : "INFO")
+  printf "DROP=%.0f RX=%.1f SEV=%s BT=%.0f CT=%.0f\n", drop, rx, sev, bt, ct }')"
 
 HOST=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo router)
-MSG="Beam-Warden ALERT - beamforming attack detected on ${HOST}
-retry=${1:-?}  PER=${2:-?}  (threshold exceeded, ${HITS_TO_ALARM:-3} windows)
-$(date '+%Y-%m-%d %H:%M:%S %Z')
-Protected client: ${MAC:-all stations}"
+IID="BW-$(date '+%Y%m%d-%H%M%S')"
+MSG="BEAM-WARDEN SECURITY ALERT - SEVERITY ${SEV}
+Beamforming-injection attack on ${HOST} targeting client ${MAC:-all stations}${VICTIM_IP:+ (${VICTIM_IP})}.
+Impact: downlink -${DROP}% (${BT}->${CT} Mbps), retry ${RX}x normal, PER ${cp}, sustained >=${HITS_TO_ALARM:-3} windows.
+WHERE  AP ${AP_BSSID:-${AP_IF:-?}}  ch ${CHANNEL:-?} (5 GHz)
+WHEN   $(date '+%Y-%m-%d %H:%M:%S %Z')
+This is a PHY-layer availability attack - a Wi-Fi password change will NOT stop it.
+Action: a rogue transmitter is within RF range of your AP - locate/remove it, or move/
+isolate the client and change the AP channel to break the capture->forge->inject loop.
+Incident ${IID} - run attack_report.py on the telemetry CSV for the full PDF report."
 
-curl -s --max-time 10 \
+# Send. Only stamp the cooldown on a CONFIRMED delivery (Telegram returns "ok":true);
+# a stamp written before the POST would make a failed send look rate-limited and hide
+# the failure. On failure we log and let the next bad window retry.
+resp=$(curl -s --max-time 10 \
   "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
   --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-  --data-urlencode "text=${MSG}" >/dev/null 2>&1
+  --data-urlencode "text=${MSG}" 2>/dev/null)
+case "$resp" in
+  *'"ok":true'*) echo "$now" > "$STAMP" ;;
+  *) logger -t beamwarden "Telegram send FAILED: ${resp:-no response}" 2>/dev/null ;;
+esac

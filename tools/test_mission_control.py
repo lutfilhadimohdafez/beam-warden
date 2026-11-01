@@ -12,12 +12,18 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-# Setup: point at replay CSV so lifespan doesn't crash
-_ROOT = Path(__file__).resolve().parent.parent
-_CSV = _ROOT / "data" / "normal_iperf.csv"
-assert _CSV.exists(), f"Missing replay CSV: {_CSV}"
+# Setup: self-contained replay CSV so lifespan doesn't crash (no committed-data dep).
+_CSV = Path(tempfile.gettempdir()) / "mc_replay_fixture.csv"
+_CSV.write_text(
+    "throughput_tx_mbps,throughput_rx_mbps,retry_rate,tx_per_pct,rx_per_pct,"
+    "rssi0,rssi1,rssi2,rssi3,label\n"
+    "50,45,0.05,0.5,0.1,-55,-58,-60,-57,normal\n"
+    "48,44,0.06,0.6,0.1,-56,-59,-61,-58,normal\n"
+    "12,10,0.40,8.0,0.2,-56,-59,-61,-58,attack\n"
+)
 
 sys.argv = [
     "dashboard.py",
@@ -30,7 +36,7 @@ sys.argv = [
 import dashboard  # noqa: E402
 
 # Patch args for tests
-dashboard.args = type("A", (), {
+_ARGS = type("A", (), {
     "mode": "replay",
     "csv": str(_CSV),
     "interval": 2.0,
@@ -39,8 +45,18 @@ dashboard.args = type("A", (), {
     "password": "x",
     "iface": "rai1",
 })()
+dashboard.args = _ARGS
 
 from starlette.testclient import TestClient  # noqa: E402
+
+
+def setup_function():
+    # Other test modules mutate these shared dashboard globals (e.g. test_live_demo
+    # overwrites .args with a live-mode namespace and leaves TASK_STATE dirty).
+    # Re-assert a clean replay slate so these tests don't depend on run order.
+    dashboard.args = _ARGS
+    dashboard.TASK_STATE.clear()
+    dashboard.latest_sample = None
 
 
 def test_tasks_returns_registry():
@@ -86,6 +102,8 @@ def test_run_echo_streams_to_websocket():
                 try:
                     raw = ws.receive_text()
                     msg = json.loads(raw)
+                    if msg.get("task") != "test_echo":
+                        continue  # ignore priming/other-task messages on the shared WS
                     if msg.get("type") == "log":
                         log_msgs.append(msg)
                     elif msg.get("type") == "status":

@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aba_measure import (abort, check_mon_hearing, count_injections,
                          ensure_attack_dead, rssi_primary, spawn_attack)
 from aba_throughput import run_iperf3_intervals, verdict_tput
-from mt76_telemetry import SSHConn, parse_iw_station_dump
+from mt76_telemetry import SSHConn, parse_iw_station_dump, window_metrics
 from gn630v_telemetry import compute_deltas
 
 # full ML schema (matches mt76_capture.py so train_supervised reads it)
@@ -47,7 +47,8 @@ FIELDS = ["timestamp", "label", "condition",
           "throughput_tx_mbps", "throughput_rx_mbps", "retry_rate",
           "tx_per_pct", "rx_per_pct", "rssi0", "rssi1", "rssi2", "rssi3",
           "tx_mcs", "tx_nss", "bytes_sent", "bytes_recv",
-          "packets_sent", "packets_recv", "tx_fail"]
+          "packets_sent", "packets_recv", "tx_fail", "tx_failed", "feature_schema",
+          "sample_seconds", "tx_failure_fraction", "active_attempts"]
 
 
 def sh(cmd: str) -> subprocess.CompletedProcess:
@@ -98,7 +99,8 @@ def teardown(phy, srv, phone_ssh):
         srv and srv.terminate()
     except Exception:
         pass
-    sh(f"{phone_ssh} 'pkill iperf3' 2>/dev/null")
+    if phone_ssh:
+        sh(f"{phone_ssh} 'pkill iperf3' 2>/dev/null")
     sh(f"iw dev mon0 del 2>/dev/null; "
        f"iw phy {phy} interface add wlan1 type managed 2>/dev/null; "
        f"nmcli device set wlan1 managed yes 2>/dev/null")
@@ -106,24 +108,28 @@ def teardown(phy, srv, phone_ssh):
 
 def sample_row(conn, ap_iface, prev):
     """One full-feature telemetry row from the AP's view of the station."""
-    cur = parse_iw_station_dump(conn.run(f"iw dev {ap_iface} station dump"))
+    cur = parse_iw_station_dump(conn.run(f"iw dev {ap_iface} station dump"), RIG['VICTIM_MAC'])
     now = time.time()
     row = None
     if prev:
         dt = now - prev["_t"]
-        d = compute_deltas(prev["_s"], cur, dt) if dt > 0 else {}
+        try:
+            d = window_metrics(prev["_s"], cur, dt)
+        except ValueError:
+            d = {}
         if d:
             row = {
                 "throughput_tx_mbps": d["throughput_tx_mbps"],
                 "throughput_rx_mbps": d["throughput_rx_mbps"],
                 "retry_rate": d["retry_rate"],
-                "tx_per_pct": cur["tx_per_pct"], "rx_per_pct": cur["rx_per_pct"],
+                "tx_per_pct": d["tx_per_pct"], "rx_per_pct": cur["rx_per_pct"],
                 "rssi0": cur["rssi0"], "rssi1": cur["rssi1"],
                 "rssi2": cur["rssi2"], "rssi3": cur["rssi3"],
                 "tx_mcs": cur["tx_mcs"], "tx_nss": cur["tx_nss"],
                 "bytes_sent": cur["bytes_sent"], "bytes_recv": cur["bytes_recv"],
                 "packets_sent": cur["packets_sent"],
                 "packets_recv": cur["packets_recv"], "tx_fail": cur["tx_fail"],
+                **{k: d[k] for k in ('tx_failed','feature_schema','sample_seconds','tx_failure_fraction','active_attempts')},
             }
     return row, {"_t": now, "_s": cur}
 

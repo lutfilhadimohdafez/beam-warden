@@ -1,0 +1,51 @@
+path,rows,labels,sha256
+data/bfi_20261031_023539.windows.csv,60,"{""normal"": 40, ""attack"": 20}",4450a088c2c79ae0f99bfb80c6c395d249d43fd3e964c63cd8bec13794314761
+data/normal_varied_20261101_101700.csv,115,"{""normal"": 115}",a78c3d60782053011eee3b62db68e9b52d89d9abfc93cd1a9f3b3ae2818b697a
+data/obj1_20261031_041217.csv,31,"{""normal"": 7, ""attack"": 24}",acc2baa0f3b7680d77adf75a52ac916f517f229e9b18bba322295ae28a4ecfb4
+data/obj1_20261031_070935.csv,32,"{""normal"": 7, ""attack"": 25}",e9bc039351685c1a9e47cf6a375ae66fb1ee9fca282a7f26338eb66a6cce3c3e
+data/obj1_20261031_175028.csv,33,"{""normal"": 7, ""attack"": 26}",3a13f964b90f6e84f989ae3b4b0209815983fb223d5eb8fdf8cca0a682d77eef
+data/obj1_20261031_182852.csv,34,"{""normal"": 7, ""attack"": 27}",8d6a29e54286f4ecb9d87c2fc5ec405557c668422d0feeb727dbe178a755e2cf
+data/obj1_20261031_194704.csv,34,"{""normal"": 7, ""attack"": 27}",d01df1dfb7cff8e5c4404115aab3a9290fab43715f42bec2a2ff382dbc8bc9d6
+data/obj1_20261101_023225.csv,34,"{""normal"": 7, ""attack"": 27}",16820f4461c9c79e87df9062ca2f65d4a902b112cced7cd599485cddf39b6a92
+data/obj1_20261101_024841.csv,32,"{""normal"": 7, ""attack"": 25}",743203f2912e551f8ff8834f691036914442c4675ba7f984398869e63f36edfd
+data/obj1_20261101_025925.csv,34,"{""normal"": 7, ""attack"": 27}",a776e9ab463b02c5c4acec0e14458c2e0211062090b105e50dee78dc7eca4d1b
+data/real_aba_20261031_024424.csv,30,"{""normal"": 20, ""attack"": 10}",9027c4f93073e10832d28be05fbed4db26117be0fce4080ddc6be9f54233bcbf
+data/real_normal_20261030_192217.csv,135,"{""normal"": 135}",8ec0a018259abb832a672ef7882314ef688d1836e77a5f413cbda2a73106a167
+data/real_test_20261031_001256.csv,16,"{""normal"": 16}",de5cc61c53d79289a469291dc521f43259c103e46131d2d047a9d3fa2911e36f
+results/sessions/20261001_180512.csv,110,"{""unlabelled"": 110}",dbcb6bc80338854fa1468b2097ce7592be2b9588f80029f89eaa201ebf7a3cb9
+results/sessions/20261012_232343_tput.csv,20,"{""unlabelled"": 20}",91f4dbade1b707d954fac81575405b165ec8cfa48190229199e9f203e87219aa
+results/sessions/20261013_101457_tput.csv,18,"{""unlabelled"": 18}",320be1c2aa5b61d7a9eb8bb714a164beab9b77a44c1ddf5394cd0452af844645
+results/sessions/20261013_102107_tput.csv,18,"{""unlabelled"": 18}",8c87fd65f731b8235f819432f67ee7b13e211b1262b467d46ef7d2d9dc9d409d
+results/sessions/20261013_102353_tput.csv,18,"{""unlabelled"": 18}",67144849b49f26fa0a3ae5111bef67834d3ac4c2bb15b6f3fb938d2344527a81
+results/sessions/20261013_102810_tput.csv,18,"{""unlabelled"": 18}",efc9c79885e80a20d81b2234f25c3bc4c528a7871c012dcd97d6d88cb0c4f4b9
+results/sessions/20261013_102936_tput.csv,14,"{""unlabelled"": 14}",b63a3bf76df2962bc41f96a5288f5b4c95fdac2c7eddb503c18bdd0374fcfacf
+results/sessions/20261013_124630_tput.csv,18,"{""unlabelled"": 18}",fca2bf10f0663059870a9c0341c5a913eb820386ff3bc1ebd81b9d0bffb4d1f6
+results/sessions/20261013_125231_tput.csv,18,"{""unlabelled"": 18}",3e606b9b3ea3e0a2e11056d8121841e97bd66b502067b822fb4de21bbb7cb710
+results/sessions/20261013_125418_tput.csv,18,"{""unlabelled"": 18}",0555bac84a2dccf841771206246113b1198f20b94d1c1878466781ff12c27187
+results/sessions/20261013_125607_tput.csv,18,"{""unlabelled"": 18}",9049f18d42e4d9d0b254657ec2e54050dc8a850e3fc8b94310ef0f9af41ec77b
+results/sessions/20261013_130411_tput.csv,18,"{""unlabelled"": 18}",ee305b85f0e1a88b65d6549a607dfee26ce149215d65ace38ebed1e00e5335fd
+results/sessions/20261013_130614_tput.csv,18,"{""unlabelled"": 18}",bfa464ea5914fa758ca1cac3fd1d62c1d923fcc083238004af489cd2925b5612
+results/sessions/aba_20261011T133825Z.csv,10,"{""unlabelled"": 10}",9daa765551054c0b9858ed95d41152973f38685362396408013b9f480a91784d
+results/sessions/aba_20261011T134025Z.csv,10,"{""unlabelled"": 10}",14224bfbb95d09fd204c76be610badd0b2844265f1b30140da0219fbf5f89365
+results/sessions/aba_20261011T140215Z.csv,40,"{""unlabelled"": 40}",c72d32d78e4931be138ebcda7994401171d1dd031518cf6f7956a3ae4105fca3
+results/sessions/aba_20261011T140619Z.csv,40,"{""unlabelled"": 40}",f6260c7cad9e11088a491b03d13ad264d3e5b2cfa033559e738d3e693c89215d
+results/sessions/aba_20261011T140936Z.csv,40,"{""unlabelled"": 40}",6ebcec2fb7f8c0e49baf8435643484bd7f459449b2edeb47a445bb66c353cbe5
+results/sessions/aba_20261011T141111Z.csv,39,"{""unlabelled"": 39}",6f39c33f96a23efc5d10aaeccfb1d6b18b4e661d11d5e2000ae583a1937c14da
+results/sessions/gui_verify3_tput.csv,33,"{""normal"": 7, ""attack"": 26}",acd8002dd64558158c5fce685c0ba696618046a43644c25e5276fa0d02c8e394
+results/sessions/tput_20261012T003534Z.csv,45,"{""unlabelled"": 45}",020f594f8bea04fb451c5650efac6c81a8803aa7514bcd2138c7230b47905a1e
+results/sessions/tput_20261012T003748Z.csv,45,"{""unlabelled"": 45}",fdb9dd95e85422e4ef81c100f6cd8b3d9cbb2309ca92e1e28a6fd1df0cdf9268
+results/sessions/tput_20261012T003920Z.csv,45,"{""unlabelled"": 45}",2383fbc1cddbde0c0da616edf1c7dde9631f9bdb4f6e2a9ddfbbc8276123f885
+results/sessions/tput_20261012T004731Z.csv,20,"{""unlabelled"": 20}",fa98b243e6353bbcb6ae6add94219962d034a1324e2c531cdbc2036808e0acf3
+results/sessions/tput_20261012T004851Z.csv,18,"{""unlabelled"": 18}",fd651ffb13a9cf3f816baf7733735e8b9ee698a95b4b779e8a03a612574c4f57
+results/sessions/tput_20261012T104338Z.csv,20,"{""unlabelled"": 20}",24a40af5eea22351592a0b1fe360d568205211e2a4eed44930d2b1b1fae34118
+results/sessions/tput_20261012T104443Z.csv,18,"{""unlabelled"": 18}",7def388342e48a66d8fc6d851fd647e75ffa02122e272405e28b060814a4146e
+results/sessions/tput_20261012T104626Z.csv,22,"{""unlabelled"": 22}",d7294bf27585a0ea006f3cd8560cede260c2f6470fc4514734c252804f064c29
+results/sessions/tput_20261012T105339Z.csv,20,"{""unlabelled"": 20}",9441b900e8cee15a1c2b1c2b4e241691656275efa163f24ec272a21f1608f114
+results/sessions/tput_20261012T105509Z.csv,20,"{""unlabelled"": 20}",0aabecda41d20fd009ce857f9e61d5d1dede3f907fec24bfa68e5d83f5fa9bb1
+results/sessions/tput_20261012T105618Z.csv,20,"{""unlabelled"": 20}",c304abc3bc2dbada6da359444d855f08af4f012b2491b8c95537b5e3c99a0806
+results/sessions/tput_20261012T105726Z.csv,20,"{""unlabelled"": 20}",8f64f3523997fc3238399b4b75503347aa91c692b3ff2f605ad81018f790c235
+results/sessions/tput_20261012T105839Z.csv,22,"{""unlabelled"": 22}",1226869b37d95eede0600764a7d74e30c4346694db5c7845e63f53872d7015d2
+results/sessions/tput_20261012T110315Z.csv,18,"{""unlabelled"": 18}",6c513d076ceb1ab61032ee9446f25227fbf7643d865fc35348454a6c4afb9f2f
+results/sessions/tput_20261012T110434Z.csv,18,"{""unlabelled"": 18}",f6876248b5c790dbc0d6fcc79a29742316c094c2865e403c852af43d967f9531
+results/sessions/tput_20261012T110704Z.csv,18,"{""unlabelled"": 18}",67a5de07a00b169e7fb0388648d6f8d1bf7ff3ede4337434de9d8d4190063931
+results/sessions/tput_20261012T125530Z.csv,18,"{""unlabelled"": 18}",adf7288da6dde2156868695f7d59832f0cecbb6fc7888f17757a86f17b4441be

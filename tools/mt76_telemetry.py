@@ -66,10 +66,18 @@ def _parse_rate(line: str) -> dict:
     }
 
 
-def parse_iw_station_dump(text: str) -> dict:
+def parse_iw_station_dump(text: str, mac: str = "") -> dict:
     """Parse `iw dev <if> station dump` (first station block) into the flat dict
     the dashboard expects. Unavailable fields keep neutral defaults.
     """
+    blocks = re.split(r'(?=^Station\s)', text, flags=re.MULTILINE)
+    stations = [b for b in blocks if b.startswith('Station ')]
+    if stations:
+        if mac:
+            stations = [b for b in stations if b.split()[1].lower() == mac.lower()]
+            if not stations:
+                raise ValueError('Protected station is not associated')
+        text = stations[0]
     d = dict(_DEFAULTS)
     tx_failed = 0          # the real 'tx failed' (dropped-after-retries) counter
     rx_drop_misc = 0
@@ -116,6 +124,7 @@ def parse_iw_station_dump(text: str) -> dict:
 
     # retry_rate (via compute_deltas) wants tx_fail/tx_success -> retries/packets.
     d["tx_success"] = d["packets_sent"]
+    d["tx_failed"] = tx_failed
     # snapshot PER from the true failed/drop counters
     if d["packets_sent"]:
         d["tx_per_pct"] = round(100.0 * tx_failed / d["packets_sent"], 3)
@@ -123,6 +132,28 @@ def parse_iw_station_dump(text: str) -> dict:
         d["rx_per_pct"] = round(100.0 * rx_drop_misc / d["packets_recv"], 3)
     # temp_c: mt76 station dump has no temperature. TODO: hwmon/debugfs if present.
     return d
+
+
+def window_metrics(prev, curr, elapsed):
+    """Interval telemetry v2: same failure fraction used by the router watcher.
+
+    Preserve raw failures so new data can be re-derived. Old cumulative CSVs
+    must remain distinguishable from this schema.
+    """
+    if elapsed <= 0:
+        raise ValueError('Sampling interval must be positive')
+    keys = ('bytes_sent', 'bytes_recv', 'packets_sent', 'packets_recv', 'tx_fail', 'tx_failed')
+    delta = {k: curr[k] - prev[k] for k in keys}
+    if any(v < 0 for v in delta.values()):
+        raise ValueError('Station counters reset; discard this interval')
+    dp, dr, df = delta['packets_sent'], delta['tx_fail'], delta['tx_failed']
+    return {'feature_schema': 'interval-v2', 'sample_seconds': elapsed,
+            'throughput_tx_mbps': delta['bytes_sent'] * 8 / elapsed / 1e6,
+            'throughput_rx_mbps': delta['bytes_recv'] * 8 / elapsed / 1e6,
+            'retry_rate': dr / max(1, dp + dr),
+            'tx_per_pct': 100 * df / max(1, dp + df),
+            'tx_failure_fraction': df / max(1, dp + df),
+            'active_attempts': dp + dr, 'tx_failed': curr['tx_failed']}
 
 
 def _tail_int(line: str) -> int:

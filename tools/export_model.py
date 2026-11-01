@@ -45,10 +45,15 @@ def _rssi(row):
     return st.mean(vs) if vs else None
 
 
-def load_run(path):
+def load_run(path, schema='legacy'):
+    raw = list(csv.DictReader(open(path)))
+    versions = {r.get('feature_schema', 'legacy') for r in raw}
+    expected = 'interval-v2' if schema == 'interval-v2' else 'legacy'
+    if versions != {expected}:
+        raise ValueError(f'{path}: expected {expected} data, got {versions}; do not mix cumulative and interval features')
     rows = [{m: (_rssi(r) if m == "rssi" else _f(r, m)) for m in METRICS}
             | {"label": 1 if r.get("label") == "attack" else 0}
-            for r in csv.DictReader(open(path))]
+            for r in raw]
     base = {}
     for m in METRICS:
         norm = [r[m] for r in rows if r["label"] == 0 and r[m] is not None]
@@ -65,6 +70,21 @@ def feats(rec, base):
     return out
 
 
+def check_baseline_units(data_base, ext_base, name, tol=25):
+    """A --baselines array must be in the SAME units as the CSV's own normal rows.
+    PER is a fraction on the router but a percent in the python display field (100x);
+    a mis-scaled or mis-ordered baseline silently corrupts every relative feature.
+    Raise on an order-of-magnitude gap. ponytail: tol=25x catches unit/order errors
+    while allowing genuine calibration-vs-eval drift."""
+    for m in METRICS:
+        dm, em = data_base[m][0], ext_base[m][0]
+        if dm and em and not (1 / tol < em / dm < tol):
+            raise ValueError(
+                f'{name}: --baselines {m} mean {em:g} is {em / dm:.0f}x the CSV normal '
+                f'mean {dm:g} -- likely a unit (percent vs fraction) or column-order '
+                f'mismatch. Use the SAME units as the data.')
+
+
 def tree_to_awk(clf_tree, fname):
     from sklearn.tree import _tree
     t = clf_tree.tree_
@@ -76,17 +96,44 @@ def tree_to_awk(clf_tree, fname):
     return f"function {fname}(f){{return {rec(0)}}}"
 
 
+def render_forest(clf):
+    ntrees=len(clf.estimators_)
+    funcs=[tree_to_awk(e,f't{i}') for i,e in enumerate(clf.estimators_)]
+    votes=''.join(f'v+=t{i}(f);' for i in range(ntrees))
+    return ('# Beam-Warden candidate; eight relative features in standard order\n'
+            +'\n'.join(funcs)+'\n'
+            +'{n=split($0,a," ");for(i=0;i<n;i++)f[i]=a[i+1];v=0;'+votes
+            +f'print(v>{ntrees//2}?1:0)}}\n')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("csvs", nargs="+")
-    ap.add_argument("--out", default="openwrt/beamwarden/files/model.awk")
+    ap.add_argument("--out", default=None)
+    ap.add_argument('--schema', choices=['legacy','interval-v2'], default='legacy')
+    ap.add_argument('--baselines', help='JSON mapping CSV filenames to preceding on-router baseline arrays (8 values)')
     a = ap.parse_args()
+    baselines = None
+    if a.schema == 'interval-v2':
+        if not a.out or not a.baselines:
+            ap.error('interval-v2 requires --out for a candidate model and --baselines for separate preceding calibration')
+        import json
+        baselines = json.loads(Path(a.baselines).read_text())
+        METRICS[1] = 'tx_failure_fraction'
+    a.out = a.out or 'openwrt/beamwarden/files/model.awk'
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import LeaveOneGroupOut, cross_val_score
 
     X, y, g = [], [], []
     for gi, p in enumerate(a.csvs):
-        rows, base = load_run(p)
+        rows, base = load_run(p, a.schema)
+        if baselines is not None:
+            values = baselines[Path(p).name]
+            if len(values) != 8:
+                raise ValueError('Baseline must contain exactly eight mean/std values')
+            ext = {m: tuple(values[i*2:i*2+2]) for i,m in enumerate(METRICS)}
+            check_baseline_units(base, ext, Path(p).name)
+            base = ext
         for r in rows:
             X.append(feats(r, base)); y.append(r["label"]); g.append(gi)
     print(f"runs: {len(a.csvs)}  samples: {len(y)}  attack {sum(y)} / normal {len(y)-sum(y)}")

@@ -137,6 +137,8 @@ def main():
     p.add_argument("--phone-port", default=RIG["PHONE_PORT"])
     p.add_argument("--phone-pass", default=RIG["PHONE_PASS"])
     p.add_argument("--mon", default="mon0")
+    p.add_argument("--monitor-ready", action="store_true",
+                   help="reuse an already prepared monitor (guided demo only)")
     p.add_argument("--channel", default=RIG["ROUTER_CHANNEL"])
     p.add_argument("--port", type=int, default=5201)
     p.add_argument("--baseline", type=float, default=30, metavar="sec",
@@ -177,7 +179,17 @@ def main():
                  f"-o StrictHostKeyChecking=no -o ConnectTimeout=8 "
                  f"{a.phone_user}@{a.victim_ip}")
 
-    phy = monitor_up(a.mon, a.channel)
+    if a.monitor_ready:
+        phy = sh(f"iw dev {a.mon} info").stdout
+        if "type monitor" not in phy:
+            abort("prepared monitor is unavailable")
+        import re
+        match = re.search(r"wiphy\s+(\d+)", phy)
+        if not match:
+            abort("cannot identify prepared monitor radio")
+        phy = "phy" + match.group(1)
+    else:
+        phy = monitor_up(a.mon, a.channel)
     if not a.no_phone_start:
         sh(f"{phone_ssh} 'pkill iperf3 2>/dev/null; termux-wake-lock; "
            f"nohup iperf3 -s -p {a.port} >/dev/null 2>&1 &'")
@@ -221,7 +233,9 @@ def main():
                 say(f"burst {k}: injections={inj}, {len(ptput)} tput samples")
                 (settled_tput if settled else ramp_tput).extend(ptput)
     finally:
-        teardown(phy, None, phone_ssh)
+        # The guided demo borrows a user-started server. Only stop it when this
+        # harness started it; otherwise the next demo fails its traffic preflight.
+        teardown(phy, None, None if a.no_phone_start else phone_ssh)
 
     # (d) honest verdict — baseline vs settled, retry delta from the logged rows
     base_retry = _csv_median(out, "retry_rate", lambda r: r["label"] == "normal")

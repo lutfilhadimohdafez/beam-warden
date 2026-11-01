@@ -1563,6 +1563,7 @@
         <div class="bfid-statuswrap">
           <div class="bfid-eyebrow">Beamforming Attack Detection &middot; ML engine</div>
           <div class="bfid-status offline" id="bfidStatus">STANDBY</div>
+          <div class="bfid-eyebrow" id="bfidDetail">Waiting for router status</div>
         </div>
         <div class="bfid-readouts">
           <div class="bfid-ro">
@@ -1659,6 +1660,20 @@
 
   <!-- ======== COMMAND CENTER TAB ======== -->
   <div class="tab-section" id="tab-command-center">
+
+    <section class="mc-section" aria-label="Guided live demo">
+      <div class="section-label">GUIDED LIVE DEMO <span id="demoStage" role="status">IDLE</span></div>
+      <p class="mc-hint">Keep the phone connected and stationary, with <code>iperf3 -s</code> running in Termux. Connect the configured OpenWrt / mt76 router above, then start. Preparation and attack run automatically; allow about 3 minutes.</p>
+      <div class="mc-params" style="align-items:end;margin:12px 0;">
+        <div class="mc-param"><label for="demoPower">Preferred AP power (mBm; 550 = 5.5 dBm)</label><input id="demoPower" type="number" min="0" max="2000" step="1" value="550"></div>
+        <button type="button" class="mc-btn run" id="demoStart">Prepare + run live demo</button>
+        <button type="button" class="mc-btn stop" id="demoStop" disabled>Stop demo</button>
+      </div>
+      <p id="demoMessage" class="mc-hint" aria-live="polite">Checks → adapter setup → fresh calibration → monitoring → measured attack. The main dashboard shows a local ML estimate; router alerts are confirmed separately below.</p>
+      <p id="demoAlert" class="mc-hint">Router alert: none observed for this run.</p>
+      <p class="mc-hint">If fixed power is unsupported, the demo keeps the current AP power and calibrates there. Command Center reports the driver’s actual power. An accepted power setting returns to auto afterward; otherwise power stays unchanged. The demo watcher stops afterward. Administrator prompts appear on this computer. Detection depends on a measurable attack effect; Telegram delivery must be checked on your phone.</p>
+    </section>
+
 
     <!-- TELEGRAM ALERTS -->
     <div class="section-label stagger">TELEGRAM ALERTS <span id="tgStatus" style="font-family:var(--font-mono);font-size:0.56rem;font-weight:600;letter-spacing:0.04em;margin-left:8px;color:var(--muted-dim);">not saved</span></div>
@@ -2527,8 +2542,59 @@
   }
 
   /* ---- Handle telemetry sample ---- */
+  function updateDemo(d) {
+    document.getElementById("demoStage").textContent = (d.stage || "idle").toUpperCase();
+    document.getElementById("demoMessage").textContent = d.message || "";
+    var evidence = document.getElementById("demoAlert");
+    evidence.textContent = d.alert ? "Router alert observed: " + (d.router_alert || "see Command Center log") : "Router alert: none observed for this run.";
+    evidence.style.color = d.alert ? "var(--danger)" : "var(--muted)";
+    var running = ["authorising", "checking", "preparing", "calibrating", "ready", "running", "stopping", "finishing"].indexOf(d.stage) >= 0;
+    document.getElementById("demoStart").disabled = running;
+    document.getElementById("demoStop").disabled = !running;
+    document.getElementById("demoPower").disabled = running;
+  }
+  document.getElementById("demoStart").addEventListener("click", function () {
+    this.disabled = true;
+    fetch("/run/live_demo", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({demo_power:document.getElementById("demoPower").value,
+        mon:document.getElementById("mcMon").value.trim() || "mon0"})
+    }).then(function(r){return r.json();}).then(function(d){
+      if (!d.ok) updateDemo({stage:"failed", message:d.error || "Could not start demo"});
+    }).catch(function(e){updateDemo({stage:"failed",message:"Connection failed: " + e});});
+  });
+  document.getElementById("demoStop").addEventListener("click", function () {
+    this.disabled = true;
+    fetch("/stop/live_demo", {method:"POST"}).then(function(r){return r.json();}).then(function(d){
+      if (!d.ok) {
+        document.getElementById("demoMessage").textContent = d.error || "Could not stop demo";
+        document.getElementById("demoStop").disabled = false;
+      }
+    }).catch(function(e){document.getElementById("demoMessage").textContent = String(e); document.getElementById("demoStop").disabled = false;});
+  });
   function setTeleVerdict(d) {
     var v = d.detect_verdict;
+    var router = d.router_detector;
+    var detail = document.getElementById("bfidDetail");
+    if (router) {
+      var states = {normal:"NORMAL", attack:"ATTACK", suspect:"SUSPECT", idle:"LOW TRAFFIC",
+        stopped:"STOPPED", stale:"STALE", error:"MODEL ERROR", unavailable:"UNAVAILABLE"};
+      var style = router.state === "attack" ? "attack" : router.state === "normal" ? "normal" : "offline";
+      $bfidPanel.className = "bfid-panel stagger " + style;
+      $bfidStatus.className = "bfid-status " + style;
+      $bfidStatus.textContent = states[router.state] || "UNAVAILABLE";
+      detail.textContent = router.state === "idle" ? "Router online · below activity threshold" :
+        router.state === "suspect" ? "Router · " + router.hits + " consecutive positive windows" :
+        router.state === "attack" ? "Router alert confirmed" : "Router watcher · " + router.state;
+      $bfidRate.textContent = fx(router.retry, 3);
+      $bfidRetry.textContent = fxTput(router.throughput);
+      $bfidScore.textContent = fx(router.per === undefined ? undefined : router.per * 100, 2);
+      if (typeof router.retry === "number") {
+        bfidSpark.push(router.retry); if (bfidSpark.length > 60) bfidSpark.shift();
+      }
+      drawBfidSpark();
+      return;
+    }
+    detail.textContent = "Dashboard estimate · router decision unavailable";
     if (v === undefined) return;               // not a live-telemetry message
     if (v === null) {                          // model/baseline not ready
       $bfidPanel.className = "bfid-panel stagger offline";
@@ -2552,6 +2618,7 @@
   }
 
   function handleMessage(d) {
+    if (d.type === "demo") { updateDemo(d); return; }
     /* Route by type: log/status → Mission Control, meta/telemetry → existing */
     if (d.mode) { runningMode = d.mode; }
     if (d.type === "log") {
@@ -2560,6 +2627,16 @@
     }
     if (d.type === "status") {
       updateChip(d.task, d.state);
+      if (d.task === "live_demo") {
+        var active = d.state === "running";
+        document.getElementById("demoStart").disabled = active;
+        document.getElementById("demoStop").disabled = !active;
+        document.getElementById("demoPower").disabled = active;
+        if (d.state === "failed") {
+          document.getElementById("demoStage").textContent = "FAILED / STOPPED";
+          document.getElementById("demoMessage").textContent += " Check Command Center output.";
+        }
+      }
       return;
     }
     if (d.type === "meta") {
@@ -2873,7 +2950,7 @@
 
   /* FIX 3a: explicit mission sequence order */
   var TASK_ORDER = [
-    "setup_monitor", "check_channel", "reset_monitor", "restore_intel", "recover_monitor", "scan_adapters", "capture_bfi", "start_attack",
+    "live_demo", "setup_monitor", "check_channel", "reset_monitor", "restore_intel", "recover_monitor", "scan_adapters", "capture_bfi", "start_attack",
     "throughput_test", "decode_features", "train_detector", "gen_synthetic", "test_echo"
   ];
 

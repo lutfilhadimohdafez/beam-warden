@@ -54,11 +54,13 @@ def test_reset_monitor_starts_services():
     assert "systemctl start NetworkManager" in joined
 
 
-def test_restore_intel_restarts_nm_and_preserves_mon0():
+def test_restore_networking_restarts_nm_and_preserves_monitor():
     cmd = resolve_cmd("restore_intel", {"mon": "mon0"})
     joined = " ".join(cmd)
     assert "systemctl start NetworkManager" in joined   # bring the Intel back
-    assert "device connect wlan0" in joined
+    assert 'device connect "$n"' in joined               # reconnect any NIC name
+    assert '[ "$n" = \'mon0\' ] && continue' in joined  # never reconnect monitor
+    assert 'device connect wlan0' not in joined
     assert "mt7921u" in joined                           # fences the Alfa phy
     assert "mon0 preserved" in joined                    # reports mon0 survival
 
