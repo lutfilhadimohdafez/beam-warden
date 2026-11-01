@@ -2384,6 +2384,9 @@ if __name__ == "__main__":
     p.add_argument("--user", default=RIG["ROUTER_USER"])
     p.add_argument("--password", default=RIG["ROUTER_PASS"])
     p.add_argument("--iface", default=RIG["ROUTER_AP_IFACE"])
+    p.add_argument("--driver", default="",
+                    help="live transport: 'mt76' (SSH/ImmortalWrt) or '' (telnet/stock MTK). "
+                         "Default in live mode: the first router profile's driver.")
     p.add_argument("--interval", type=float, default=2.0)
     p.add_argument("--mode", choices=["live", "replay"], default=None)
     p.add_argument("--csv", default="data/normal_iperf.csv")
@@ -2402,6 +2405,24 @@ if __name__ == "__main__":
     p.add_argument("--selfcheck-bfi", nargs=2, metavar=("PCAP", "PHASES"), default=None,
                     help="Validate the BFI-storm detector against a labelled pcap and exit")
     args = p.parse_args()
+
+    # User-friendly: in live mode with no --driver, adopt the first router profile's
+    # driver so a bare `--mode live` connects via the right transport (mt76/SSH) instead
+    # of defaulting to telnet and showing "[Errno 111] Connection refused" on OpenWrt.
+    if args.mode == "live" and not args.driver:
+        try:
+            _rp = _HERE / "routers.local.json"
+            if not _rp.exists():
+                _rp = _HERE / "routers.example.json"
+            _prof = (json.loads(_rp.read_text()).get("profiles") or [{}])[0]
+            args.driver = _prof.get("driver", "")
+            if args.driver == "mt76":  # match the profile so live telemetry connects
+                for _f, _k in (("host", "host"), ("user", "user"),
+                               ("password", "password"), ("iface", "iface")):
+                    if _prof.get(_k):
+                        setattr(args, _f, _prof[_k])
+        except Exception:
+            pass
 
     if args.selfcheck_calib:
         _selfcheck_calib()

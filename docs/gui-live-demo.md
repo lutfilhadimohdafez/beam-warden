@@ -113,12 +113,13 @@ bursts → detector verdict=1 → ALARM → Telegram delivered** (stamp advanced
 laptop crashes (the 12 s-burst / 60 s-timeout design held).
 
 ### Gotchas found (do these or the demo fails)
-1. **Connect FIRST.** The Guided Live Demo refuses (`409 "Connect the router in
-   Live mode using the OpenWrt / mt76 profile first"`) until you select the mt76
-   profile on the **Dashboard** tab and click **Connect** — that sets the live
-   session and `driver=mt76`. Launching `dashboard.py --mode live` alone is not
-   enough; without the mt76 driver the backend uses telnet and shows
-   `[Errno 111] Connection refused`.
+1. **Launch connects automatically now.** `dashboard.py --mode live` adopts the
+   first router profile's `driver` at startup, so it connects via mt76/SSH and the
+   Guided Live Demo works with **no manual Connect**. (Before this fix a bare launch
+   defaulted to telnet → `[Errno 111] Connection refused` + a `409` on the demo,
+   needing a Dashboard-tab **Connect** first.) If you ever do see the Errno — e.g.
+   after switching profiles — just DISCONNECT → CONNECT the mt76 profile on the
+   Dashboard tab to re-establish the SSH session.
 2. **Phone iperf3 server must be live.** Preflight runs `iperf3 -c <phone> -t 1`;
    if the Termux server is hung the demo aborts (`timed out after 10 s`). ADB
    canNOT restart it (no root; Termux SSH may be down; RUN_COMMAND disabled), so
