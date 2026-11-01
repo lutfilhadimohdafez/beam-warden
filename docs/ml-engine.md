@@ -88,6 +88,12 @@ as a fallback only if `model.awk` is absent.)
   monitor mode (not portable) — the deliberate tradeoff for universal deployability.
 - ⚠️ 5 runs on one rig; more conditions (distance/channel/load/**hardware**) would
   shrink that fold — the outstanding rigor work.
+- ⚠️ **Real-world robustness is characterized, not solved.** Live testing exposed three
+  confounds — covert attack (physics), load (fixed via gate-to-load), and **link drift**
+  (a static baseline goes stale as RSSI/rate wander). See
+  **`docs/detector-characterization.md`** for the evidence and the research path
+  (adaptive baseline + drift-robust features). For a reliable demo today use the
+  **controlled protocol** (`tools/demo_live.sh`: fresh calibrate → immediate attack).
 
 ---
 
