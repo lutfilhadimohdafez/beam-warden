@@ -2082,6 +2082,39 @@ def _valid_tg(token: str, chat: str) -> bool:
     return tok_ok and chat_ok
 
 
+def _telegram_profile_path() -> Path:
+    return _HERE / "telegram.local.json"
+
+
+def _save_telegram_profile(token: str, chat: str) -> None:
+    # Persist like routers.local.json: gitignored local file, never baked into code.
+    # ponytail: best-effort — the router's /etc/beamwarden.conf is the live source.
+    try:
+        _telegram_profile_path().write_text(
+            json.dumps({"token": token, "chat_id": chat}, indent=2))
+    except Exception:
+        pass
+
+
+async def _telegram_profile(request: Request) -> JSONResponse:
+    """GET /telegram/profile — the saved Telegram creds, to pre-fill the alert panel
+    (same idea as /router-profiles). Reads tools/telegram.local.json (gitignored);
+    falls back to rig.conf so a configured rig pre-fills without retyping.
+    Localhost-only — creds never leave this machine."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    p = _telegram_profile_path()
+    if p.exists():
+        try:
+            d = json.loads(p.read_text())
+            return JSONResponse({"token": d.get("token", ""),
+                                 "chat_id": d.get("chat_id", ""), "source": p.name})
+        except Exception:
+            pass
+    return JSONResponse({"token": RIG.get("TELEGRAM_BOT_TOKEN", ""),
+                         "chat_id": RIG.get("TELEGRAM_CHAT_ID", ""), "source": "rig.conf"})
+
+
 async def _telegram_test(request: Request) -> JSONResponse:
     """Send a test message via the Telegram Bot API (from this dashboard host)."""
     body = await request.json()
@@ -2113,6 +2146,8 @@ async def _telegram_save(request: Request) -> JSONResponse:
     chat = (body.get("chat_id") or "").strip()
     if not _valid_tg(token, chat):
         return JSONResponse({"ok": False, "error": "token or chat_id format invalid"}, status_code=400)
+    # persist the profile locally first (survives SSH failure; pre-fills next session)
+    _save_telegram_profile(token, chat)
     cmd = ("sed -i '/^TELEGRAM_BOT_TOKEN=/d; /^TELEGRAM_CHAT_ID=/d' /etc/beamwarden.conf 2>/dev/null; "
            f"printf 'TELEGRAM_BOT_TOKEN=%s\\nTELEGRAM_CHAT_ID=%s\\n' '{token}' '{chat}' >> /etc/beamwarden.conf; "
            "/etc/init.d/beamwarden restart 2>/dev/null; echo saved")
@@ -2193,6 +2228,7 @@ app = Starlette(
     routes=[
         Route("/", _homepage),
         Route("/ml", _ml_page),
+        Route("/telegram/profile", _telegram_profile, methods=["GET"]),
         Route("/telegram/test", _telegram_test, methods=["POST"]),
         Route("/telegram/save", _telegram_save, methods=["POST"]),
         Route("/tasks", _tasks_endpoint),

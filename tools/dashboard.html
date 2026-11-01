@@ -1699,6 +1699,15 @@
     (function () {
       var tok = document.getElementById("tgToken"), chat = document.getElementById("tgChat"),
           res = document.getElementById("tgResult"), st = document.getElementById("tgStatus");
+      // pre-fill from the saved profile (tools/telegram.local.json, gitignored) —
+      // never hardcoded in this page, same as the router profiles.
+      fetch("/telegram/profile").then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.token && !tok.value) tok.value = d.token;
+        if (d && d.chat_id && !chat.value) chat.value = d.chat_id;
+        if (d && (d.token || d.chat_id) && st) {
+          st.textContent = "saved (" + (d.source || "profile") + ")"; st.style.color = "var(--ok)";
+        }
+      }).catch(function () { /* no profile endpoint → manual entry */ });
       function post(path) {
         res.textContent = "…"; res.style.color = "var(--muted)";
         return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },

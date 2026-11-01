@@ -72,6 +72,15 @@ def test_tasks_returns_registry():
         print("  PASS: /tasks returns registry")
 
 
+def test_telegram_profile_prefill():
+    """GET /telegram/profile returns saved/fallback creds to pre-fill the alert panel."""
+    with TestClient(dashboard.app) as client:
+        r = client.get("/telegram/profile")
+        assert r.status_code == 200, r.status_code
+        d = r.json()
+        assert "token" in d and "chat_id" in d and "source" in d, d
+
+
 def test_run_unknown_rejected():
     """POST /run/{unknown_name} returns 404."""
     with TestClient(dashboard.app) as client:
