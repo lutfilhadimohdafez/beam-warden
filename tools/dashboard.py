@@ -2086,33 +2086,61 @@ def _telegram_profile_path() -> Path:
     return _HERE / "telegram.local.json"
 
 
-def _save_telegram_profile(token: str, chat: str) -> None:
-    # Persist like routers.local.json: gitignored local file, never baked into code.
-    # ponytail: best-effort — the router's /etc/beamwarden.conf is the live source.
+def _read_telegram_file_profiles() -> list[dict]:
+    """Named bot profiles persisted in telegram.local.json (gitignored), like
+    routers.local.json. Migrates the old single-object format. [] if none."""
+    p = _telegram_profile_path()
+    if not p.exists():
+        return []
     try:
-        _telegram_profile_path().write_text(
-            json.dumps({"token": token, "chat_id": chat}, indent=2))
+        d = json.loads(p.read_text())
+        if isinstance(d.get("profiles"), list):
+            return d["profiles"]
+        if d.get("token") or d.get("chat_id"):  # legacy single profile
+            return [{"name": "saved", "token": d.get("token", ""), "chat_id": d.get("chat_id", "")}]
+    except Exception:
+        pass
+    return []
+
+
+def _effective_telegram_profiles() -> list[dict]:
+    """Saved profiles, else a single rig.conf-derived default so a configured rig
+    still shows one bot without retyping. Creds never baked into the page."""
+    profs = _read_telegram_file_profiles()
+    if profs:
+        return profs
+    tok, chat = RIG.get("TELEGRAM_BOT_TOKEN", ""), RIG.get("TELEGRAM_CHAT_ID", "")
+    return [{"name": "rig.conf", "token": tok, "chat_id": chat}] if (tok or chat) else []
+
+
+def _save_telegram_profile(name: str, token: str, chat: str) -> None:
+    # Upsert a named profile into telegram.local.json (by name), like adding a
+    # router profile. ponytail: best-effort — the router's conf is the live source.
+    name = (name or "saved").strip()
+    profs = [p for p in _read_telegram_file_profiles() if p.get("name") != name]
+    profs.append({"name": name, "token": token, "chat_id": chat})
+    try:
+        _telegram_profile_path().write_text(json.dumps({"profiles": profs}, indent=2))
     except Exception:
         pass
 
 
-async def _telegram_profile(request: Request) -> JSONResponse:
-    """GET /telegram/profile — the saved Telegram creds, to pre-fill the alert panel
-    (same idea as /router-profiles). Reads tools/telegram.local.json (gitignored);
-    falls back to rig.conf so a configured rig pre-fills without retyping.
-    Localhost-only — creds never leave this machine."""
+async def _telegram_profiles(request: Request) -> JSONResponse:
+    """GET /telegram/profiles — saved Telegram bot profiles for the dropdown,
+    exactly like /router-profiles. Localhost-only; creds never leave this machine."""
     if not _is_loopback(request):
         return JSONResponse({"error": "localhost only"}, status_code=403)
-    p = _telegram_profile_path()
-    if p.exists():
-        try:
-            d = json.loads(p.read_text())
-            return JSONResponse({"token": d.get("token", ""),
-                                 "chat_id": d.get("chat_id", ""), "source": p.name})
-        except Exception:
-            pass
-    return JSONResponse({"token": RIG.get("TELEGRAM_BOT_TOKEN", ""),
-                         "chat_id": RIG.get("TELEGRAM_CHAT_ID", ""), "source": "rig.conf"})
+    return JSONResponse({"profiles": _effective_telegram_profiles()})
+
+
+async def _telegram_profile(request: Request) -> JSONResponse:
+    """GET /telegram/profile — the first/active saved bot, for backward-compat prefill."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    profs = _effective_telegram_profiles()
+    d = profs[0] if profs else {"name": "", "token": "", "chat_id": ""}
+    return JSONResponse({"token": d.get("token", ""), "chat_id": d.get("chat_id", ""),
+                         "source": d.get("name", "profile")})
 
 
 async def _telegram_test(request: Request) -> JSONResponse:
@@ -2142,12 +2170,13 @@ async def _telegram_save(request: Request) -> JSONResponse:
     """Write TELEGRAM_* into the router's /etc/beamwarden.conf over SSH, so the
     on-router alert hook picks them up (restart beamwarden to apply)."""
     body = await request.json()
+    name = (body.get("name") or "saved").strip()
     token = (body.get("token") or "").strip()
     chat = (body.get("chat_id") or "").strip()
     if not _valid_tg(token, chat):
         return JSONResponse({"ok": False, "error": "token or chat_id format invalid"}, status_code=400)
-    # persist the profile locally first (survives SSH failure; pre-fills next session)
-    _save_telegram_profile(token, chat)
+    # persist the named profile locally first (survives SSH failure; fills the dropdown)
+    _save_telegram_profile(name, token, chat)
     cmd = ("sed -i '/^TELEGRAM_BOT_TOKEN=/d; /^TELEGRAM_CHAT_ID=/d' /etc/beamwarden.conf 2>/dev/null; "
            f"printf 'TELEGRAM_BOT_TOKEN=%s\\nTELEGRAM_CHAT_ID=%s\\n' '{token}' '{chat}' >> /etc/beamwarden.conf; "
            "/etc/init.d/beamwarden restart 2>/dev/null; echo saved")
@@ -2228,6 +2257,7 @@ app = Starlette(
     routes=[
         Route("/", _homepage),
         Route("/ml", _ml_page),
+        Route("/telegram/profiles", _telegram_profiles, methods=["GET"]),
         Route("/telegram/profile", _telegram_profile, methods=["GET"]),
         Route("/telegram/test", _telegram_test, methods=["POST"]),
         Route("/telegram/save", _telegram_save, methods=["POST"]),

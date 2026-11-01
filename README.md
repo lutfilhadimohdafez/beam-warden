@@ -17,6 +17,48 @@ detector — without touching the Wi-Fi protocol itself.
 
 ---
 
+## How it runs — two tiers
+
+Beam Warden is **two separate pieces**. Know which is which:
+
+```
+ TIER 1 — the ROUTER (the product)          TIER 2 — a SERVER/DESKTOP (optional)
+ ┌───────────────────────────────┐  SSH /  ┌──────────────────────────────────┐
+ │ the .ipk: a headless detector  │  web /  │ tools/dashboard.py (Python)       │
+ │ • reads `iw station dump`       │ Telegram│ • live charts + ML verdict        │
+ │ • scores with model.awk (ML)    │────────▶│ • Command Center (demo/attack rig)│
+ │ • logs alerts + Telegram        │  hook   │ Runs on YOUR machine, NOT the     │
+ │ ~1 MB RAM, ~0% CPU, no deps     │         │ router. Not needed to be protected│
+ └───────────────────────────────┘         └──────────────────────────────────┘
+```
+
+- **The detector lives entirely on the router** (Tier 1). A defender installs the
+  `.ipk`, calibrates, and gets **Telegram alerts + a JSONL audit log** — no desktop
+  needed. It's featherweight (~1 MB RAM) because the RandomForest is compiled to a
+  pure-`awk` tree-walk — zero ML runtime on the router.
+- **The dashboard is an optional desktop app** (Tier 2) that SSHes in to *visualise*
+  the same telemetry and drive the attack demo. Its on-screen verdict is an
+  *estimate*; the **router's own watcher is the authority** that alerts.
+- **Two "learnings":** the **model** (how the attack looks) is trained once by us and
+  shipped fixed in the `.ipk`; the **baseline** (this network's normal) is what each
+  user learns via `beamwarden calibrate`. Relative features bridge them, so one model
+  works on any router.
+- **NOC integration:** the router already logs alerts to **syslog** (point it at your
+  NOC with one line) and to `ALERT_LOG` (a JSONL audit trail). A central
+  collector/dashboard that aggregates many routers into one web UI is the planned
+  next step (SQLite + webhook — see `docs/`).
+
+**Quickstart (router / Tier 1):** `install .ipk` → set `AP_IF`/`MAC`/Telegram token in
+`/etc/beamwarden.conf` → `beamwarden calibrate` (learn normal, ~2 min) →
+`/etc/init.d/beamwarden enable && start`. Full steps + apk-router note in
+[`openwrt/beamwarden/README.md`](openwrt/beamwarden/README.md).
+
+**Quickstart (dashboard / Tier 2):** `.venv/bin/python tools/dashboard.py` →
+`localhost:8080` → pick the router profile → Connect. Demo runbook:
+[`docs/gui-live-demo.md`](docs/gui-live-demo.md).
+
+---
+
 ## Status at a glance
 
 | # | Objective | Target | Status |

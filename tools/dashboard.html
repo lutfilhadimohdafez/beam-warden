@@ -1680,6 +1680,16 @@
     <div class="mc-section stagger">
       <div class="mc-params">
         <div class="mc-param">
+          <label>Saved bot <span class="mc-hint">pick one, or New… — like router profiles</span></label>
+          <select id="tgProfile"></select>
+        </div>
+        <div class="mc-param">
+          <label>Profile name <span class="mc-hint">e.g. NOC, Lab, On-call</span></label>
+          <input id="tgName" placeholder="my-bot">
+        </div>
+      </div>
+      <div class="mc-params">
+        <div class="mc-param">
           <label>Bot Token <span class="mc-hint">from @BotFather</span></label>
           <input id="tgToken" type="password" placeholder="123456:ABC-DEF...">
         </div>
@@ -1690,28 +1700,56 @@
       </div>
       <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button type="button" id="tgTest" style="font-family:var(--font-mono);font-size:0.6rem;padding:5px 12px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:4px;">Send test alert</button>
-        <button type="button" id="tgSave" style="font-family:var(--font-mono);font-size:0.6rem;padding:5px 12px;cursor:pointer;background:var(--ok,#35d07f);color:#111;border:none;border-radius:4px;">Save to router</button>
+        <button type="button" id="tgSave" style="font-family:var(--font-mono);font-size:0.6rem;padding:5px 12px;cursor:pointer;background:var(--ok,#35d07f);color:#111;border:none;border-radius:4px;">Save profile + push</button>
         <span id="tgResult" style="font-family:var(--font-mono);font-size:0.6rem;"></span>
       </div>
-      <div class="mc-hint" style="margin-top:6px;">The router sends alerts itself (HTTPS to Telegram &mdash; no PC needed). <b>Save</b> writes the keys into the router's <code>/etc/beamwarden.conf</code> and restarts the watcher; <b>Test</b> sends a message now to verify.</div>
+      <div class="mc-hint" style="margin-top:6px;">The router sends alerts itself (HTTPS to Telegram &mdash; no PC needed). <b>Save profile + push</b> stores this bot under its name (pick it again from the dropdown later) <em>and</em> writes the keys into the router's <code>/etc/beamwarden.conf</code>, restarting the watcher; <b>Test</b> sends a message now to verify.</div>
     </div>
     <script>
     (function () {
       var tok = document.getElementById("tgToken"), chat = document.getElementById("tgChat"),
+          name = document.getElementById("tgName"), sel = document.getElementById("tgProfile"),
           res = document.getElementById("tgResult"), st = document.getElementById("tgStatus");
-      // pre-fill from the saved profile (tools/telegram.local.json, gitignored) —
-      // never hardcoded in this page, same as the router profiles.
-      fetch("/telegram/profile").then(function (r) { return r.json(); }).then(function (d) {
-        if (d && d.token && !tok.value) tok.value = d.token;
-        if (d && d.chat_id && !chat.value) chat.value = d.chat_id;
-        if (d && (d.token || d.chat_id) && st) {
-          st.textContent = "saved (" + (d.source || "profile") + ")"; st.style.color = "var(--ok)";
-        }
-      }).catch(function () { /* no profile endpoint → manual entry */ });
+      // Saved Telegram bot profiles — a named list in tools/telegram.local.json
+      // (gitignored), picked from a dropdown, exactly like the router profiles.
+      // Creds are never hardcoded in this page.
+      var TG_PROFILES = [];
+      function fill(p) {
+        if (!p) return;
+        name.value = (p.name === "rig.conf") ? "" : (p.name || "");
+        tok.value = p.token || ""; chat.value = p.chat_id || "";
+      }
+      function loadProfiles(selectName) {
+        return fetch("/telegram/profiles").then(function (r) { return r.json(); }).then(function (d) {
+          TG_PROFILES = d.profiles || [];
+          sel.innerHTML = "";
+          TG_PROFILES.forEach(function (p, i) {
+            var o = document.createElement("option");
+            o.value = String(i); o.textContent = p.name || ("Bot " + (i + 1));
+            sel.appendChild(o);
+          });
+          var oc = document.createElement("option"); oc.value = "new"; oc.textContent = "New…";
+          sel.appendChild(oc);
+          var idx = 0;
+          if (selectName) for (var i = 0; i < TG_PROFILES.length; i++)
+            if (TG_PROFILES[i].name === selectName) idx = i;
+          sel.value = String(idx);
+          if (TG_PROFILES.length) {
+            fill(TG_PROFILES[idx]);
+            st.textContent = "saved (" + (TG_PROFILES[idx].name || "profile") + ")";
+            st.style.color = "var(--ok)";
+          }
+        }).catch(function () { /* no endpoint → manual entry */ });
+      }
+      sel.addEventListener("change", function () {
+        if (this.value === "new") { name.value = ""; tok.value = ""; chat.value = ""; name.focus(); return; }
+        fill(TG_PROFILES[parseInt(this.value, 10)]);
+      });
+      loadProfiles();
       function post(path) {
         res.textContent = "…"; res.style.color = "var(--muted)";
         return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: tok.value.trim(), chat_id: chat.value.trim() }) })
+          body: JSON.stringify({ name: name.value.trim(), token: tok.value.trim(), chat_id: chat.value.trim() }) })
           .then(function (r) { return r.json(); });
       }
       document.getElementById("tgTest").onclick = function () {
@@ -1722,9 +1760,9 @@
       };
       document.getElementById("tgSave").onclick = function () {
         post("/telegram/save").then(function (d) {
-          res.textContent = d.ok ? "saved to router + watcher restarted" : ("failed: " + (d.error || ""));
+          res.textContent = d.ok ? "saved profile + pushed to router" : ("failed: " + (d.error || ""));
           res.style.color = d.ok ? "var(--ok)" : "var(--danger)";
-          if (d.ok && st) { st.textContent = "saved"; st.style.color = "var(--ok)"; }
+          if (d.ok) loadProfiles(name.value.trim() || "saved");
         }).catch(function () { res.textContent = "error"; res.style.color = "var(--danger)"; });
       };
     })();

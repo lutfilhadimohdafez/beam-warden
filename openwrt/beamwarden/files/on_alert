@@ -1,27 +1,18 @@
 #!/bin/sh
-# Beam-Warden alert hook — pushes a Telegram incident report when `beamwarden watch`
-# detects an attack. Called as: on_alert <retry_rate> <per_rate> <throughput_mbps>
+# Beam-Warden alert hook — logs every alarm to a local JSONL audit trail and pushes a
+# Telegram incident report. Called as: on_alert <retry_rate> <per_rate> <throughput_mbps>
 #
-# The router sends this itself (just an HTTPS POST to the Telegram Bot API) — no PC,
-# no server, no polling. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in
-# /etc/beamwarden.conf (get the token from @BotFather; empty = alerts off).
-# The message mirrors tools/attack_report.py's SECURITY INCIDENT REPORT so the
-# chat alert reads the same as the PDF we generate offline.
-# ponytail: one curl + one awk for the deltas. Needs +curl +ca-bundle (HTTPS).
+# Two independent outputs:
+#   1. ALERT_LOG  — one JSON line per alarm, always (the audit trail / future NOC
+#      collector tails this). Flash-cheap: alarms are rate-limited and rare.
+#   2. Telegram   — HTTPS POST from the router itself (no PC). Rate-limited; the
+#      message mirrors tools/attack_report.py's SECURITY INCIDENT REPORT.
+# Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID + ALERT_LOG in /etc/beamwarden.conf.
+# ponytail: one awk for the deltas, one curl. Needs +curl +ca-bundle for Telegram.
 CONF=/etc/beamwarden.conf
 [ -f "$CONF" ] && . "$CONF"
-[ "${NOTIFY_ENABLED:-1}" = "1" ] || exit 0
-[ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || exit 0
 
-# rate-limit: at most one Telegram per TELEGRAM_COOLDOWN s (default 60) so a
-# sustained attack doesn't spam the chat.
-STAMP=/tmp/beamwarden.last_alert
-COOLDOWN="${TELEGRAM_COOLDOWN:-60}"
-now=$(date +%s)
-last=$(cat "$STAMP" 2>/dev/null || echo 0)
-[ $((now - last)) -lt "$COOLDOWN" ] && exit 0
-
-# Derive impact + severity from this window vs the calibrated baseline, the same
+# --- derive impact + severity from this window vs the calibrated baseline, the same
 # way the incident report does: retry Nx normal, downlink drop %, HIGH/MEDIUM/INFO.
 # baseline cols: retry_mean retry_std per_mean per_std tput_mean tput_std rssi...
 STATE="${STATE:-/var/run/beamwarden.base}"
@@ -36,6 +27,25 @@ eval "$(awk -v cr="$cr" -v ct="$ct" -v br="$br" -v bt="$bt" 'BEGIN{
 
 HOST=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo router)
 IID="BW-$(date '+%Y%m%d-%H%M%S')"
+NOW=$(date +%s)
+
+# --- 1. AUDIT LOG (always, independent of Telegram) ---------------------------
+ALERT_LOG="${ALERT_LOG:-/etc/beamwarden/alerts.jsonl}"
+if [ -n "$ALERT_LOG" ]; then
+  printf '{"ts":%s,"iid":"%s","host":"%s","severity":"%s","client":"%s","retry":%s,"per":%s,"tput_mbps":%s,"baseline_tput":%s,"drop_pct":%s,"retry_x":%s}\n' \
+    "$NOW" "$IID" "$HOST" "$SEV" "${MAC:-all}" "$cr" "$cp" "$ct" "$BT" "$DROP" "$RX" >> "$ALERT_LOG" 2>/dev/null
+fi
+
+# --- 2. TELEGRAM (opt-in, rate-limited) ---------------------------------------
+[ "${NOTIFY_ENABLED:-1}" = "1" ] || exit 0
+[ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || exit 0
+
+# rate-limit: at most one Telegram per TELEGRAM_COOLDOWN s (default 60).
+STAMP=/tmp/beamwarden.last_alert
+COOLDOWN="${TELEGRAM_COOLDOWN:-60}"
+last=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((NOW - last)) -lt "$COOLDOWN" ] && exit 0
+
 MSG="BEAM-WARDEN SECURITY ALERT - SEVERITY ${SEV}
 Beamforming-injection attack on ${HOST} targeting client ${MAC:-all stations}${VICTIM_IP:+ (${VICTIM_IP})}.
 Impact: downlink -${DROP}% (${BT}->${CT} Mbps), retry ${RX}x normal, PER ${cp}, sustained >=${HITS_TO_ALARM:-3} windows.
@@ -46,14 +56,13 @@ Action: a rogue transmitter is within RF range of your AP - locate/remove it, or
 isolate the client and change the AP channel to break the capture->forge->inject loop.
 Incident ${IID} - run attack_report.py on the telemetry CSV for the full PDF report."
 
-# Send. Only stamp the cooldown on a CONFIRMED delivery (Telegram returns "ok":true);
-# a stamp written before the POST would make a failed send look rate-limited and hide
-# the failure. On failure we log and let the next bad window retry.
+# Only stamp the cooldown on a CONFIRMED delivery (Telegram returns "ok":true); a stamp
+# written before the POST would make a failed send look rate-limited and hide the failure.
 resp=$(curl -s --max-time 10 \
   "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
   --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
   --data-urlencode "text=${MSG}" 2>/dev/null)
 case "$resp" in
-  *'"ok":true'*) echo "$now" > "$STAMP" ;;
+  *'"ok":true'*) echo "$NOW" > "$STAMP" ;;
   *) logger -t beamwarden "Telegram send FAILED: ${resp:-no response}" 2>/dev/null ;;
 esac
