@@ -9,7 +9,13 @@ so it runs on *anyone's* router.
 ## How a defender uses it (step by step)
 
 1. **Build** (once, OpenWrt SDK for your target): `make package/beamwarden/compile`
-2. **Install**: `opkg install beamwarden_*.ipk`
+2. **Install**:
+   - Classic OpenWrt (opkg, ≤23.05): `opkg install beamwarden_*.ipk`
+   - Newer OpenWrt / ImmortalWrt (apk, ≥24.10 — no opkg): no `.ipk` support yet, so
+     drop the files in directly:
+     `tar xzf <(ar p beamwarden_*.ipk data.tar.gz) -C /` then
+     `chmod +x /usr/bin/beamwarden /etc/init.d/beamwarden /etc/beamwarden/on_alert`
+     (depends: `iw`, `curl`, `ca-bundle`).
 3. **Point it at your AP** — set `AP_IF` in `/etc/beamwarden.conf` (find it with `iw dev`).
 4. **Teach it your normal** (the important step):
    ```
@@ -21,7 +27,9 @@ so it runs on *anyone's* router.
    ```
    ALERT beamforming-attack: retry=0.52 (th 0.47) per=0.31 (th 0.26) ...
    ```
-   Optional `/etc/beamwarden/on_alert` hook (args: `retry per`) for LED/Telegram/quarantine.
+   The `/etc/beamwarden/on_alert` hook (args: `retry per throughput`) pushes a
+   Telegram incident report (severity, affected client, impact) — set the token in
+   `/etc/beamwarden.conf`. Also usable for LED/quarantine.
 
 ## How it detects — adapter-free, and why that works on any router
 
