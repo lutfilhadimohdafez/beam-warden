@@ -25,6 +25,29 @@ detector — without touching the Wi-Fi protocol itself.
 | 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — SSH `station dump` capture + real datasets + live dashboard; attack moves retry **5.4×** and throughput **−36%** (≫15% variance) |
 | 3 | ML anomaly detection | ≥55% accuracy | 🟢 **ACHIEVED — 100%** — BFI-storm anomaly detection on **real** data, leakage-safe GroupKFold (every fold 100%). *Within one condition*; cross-condition is honest future work. `tools/bfi_run.py` + `tools/bfi_features.py` |
 
+**Update — 2026-11-02 (independent audit):**
+- **Router Telegram alerting is live.** When `beamwarden watch` fires, the router
+  itself POSTs an incident report to Telegram (no PC, no server) — mirroring
+  `tools/attack_report.py`'s SECURITY INCIDENT REPORT: severity (HIGH/MEDIUM/INFO),
+  the protected client (MAC+IP), AP BSSID/channel, impact (downlink drop %, retry
+  ×normal, PER), a PHY-layer note and recommended response. Delivery is confirmed
+  (the cooldown stamp is written **only** on Telegram `"ok":true`), and the token
+  lives in config, never in code.
+- **Detector verified on the live AC2100:** service running, `model.awk` + learned
+  baseline in place, victim associated — the detection half is demo-ready.
+- **Test suite 98/98 green** (retired two tests of deleted helpers; the Wi-Fi 6 HE
+  decoder is preserved in git `@45f7ac0` for the HE port). Added a `--baselines`
+  unit guard to `export_model.py` and an interval-v2 feature schema so capture,
+  offline eval and the on-router watcher compute identical window features.
+- **Independent audit added** ([`docs/audit-2026-11-01/review.md`](docs/audit-2026-11-01/review.md)):
+  a read-only proposal-vs-evidence review. Honest standing — **OBJ2** is strongly
+  supported; **OBJ1** still needs a *trial-based success rate* (distinct from the
+  throughput-loss headline); **OBJ3** is packaged and reproduces **80.1%
+  leave-one-run-out** on one rig, with a deployed on-router evaluation and a
+  confirmatory multi-trial campaign (with sham controls) as the remaining
+  acceptance work. The 🟢 marks above are engineering milestones, not yet
+  closed acceptance criteria — see the audit for the exact closure checklist.
+
 **Update — 2026-10-31:** The months-long "attack injects 0 / no BFI captured"
 blocker was **degraded Alfa firmware** (`modprobe -r mt7921u; modprobe mt7921u`
 restores VHT capture — now baked into the harness). With that fixed: forged-BFI
