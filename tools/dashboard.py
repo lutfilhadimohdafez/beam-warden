@@ -325,16 +325,16 @@ def _telemetry_verdict(retry, per, tput, rssi_list, ont):
     if not _RIG_BASELINE:
         return None
     retry, per, tput = retry or 0.0, per or 0.0, tput or 0.0
-    if tput < 1.0 and retry < 0.05:           # activity gate: idle link = nothing to attack
-        return "idle"
+    if tput < 15.0:            # GATE-TO-LOAD: only score under substantial load (mirrors
+        return "idle"          # the router's frames-attempted gate; light/idle not scored)
     rssi = [v for v in rssi_list if v is not None]
     rssi = (sum(rssi) / len(rssi)) if rssi else -60.0
     rm, rsd, pm, psd, tm, tsd, rsm, rssd = _RIG_BASELINE
     e = 1e-6
-    # model features: retry/PER/RSSI (throughput dropped - demand-confounded; still
-    # used above for the idle gate)
+    # model features: retry/PER/throughput/RSSI (throughput valid - the load gate
+    # above guarantees we only score comparable heavy load)
     feats = [retry / (rm + e), (retry - rm) / (rsd + e), per / (pm + e), (per - pm) / (psd + e),
-             rssi / (rsm + e), (rssi - rsm) / (rssd + e)]
+             tput / (tm + e), (tput - tm) / (tsd + e), rssi / (rsm + e), (rssi - rsm) / (rssd + e)]
     try:
         r = subprocess.run(["awk", "-f", str(_MODEL_AWK)],
                            input=" ".join(f"{v:.6g}" for v in feats) + "\n",

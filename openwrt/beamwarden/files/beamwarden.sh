@@ -22,9 +22,12 @@ MAC="${MAC:-}"                       # client MAC to protect; empty = aggregate 
 WIN="${WIN:-2}"
 CAL_SECONDS="${CAL_SECONDS:-120}"
 HITS_TO_ALARM="${HITS_TO_ALARM:-3}"  # consecutive attack windows before alerting
-ACTIVE_MIN_PKTS="${ACTIVE_MIN_PKTS:-100}"  # skip detection when the link is idle (no
-                                     # traffic -> throughput 0 looks like a collapse);
-                                     # the model only knows under-load normal vs attack
+ACTIVE_MIN_PKTS="${ACTIVE_MIN_PKTS:-3000}"  # GATE-TO-LOAD: only evaluate under
+                                     # SUBSTANTIAL load (frames attempted/window). Light/
+                                     # idle windows have noisy retry + low-by-demand
+                                     # throughput -> would false-alarm; the attack both
+                                     # matters and separates only under real load. Tune
+                                     # to ~a third of your heavy-load frames/window.
 RETRY_MULT="${RETRY_MULT:-1.5}"      # fallback threshold only (no model.awk)
 RETRY_FLOOR="${RETRY_FLOOR:-0.30}"   # fallback threshold only
 MODEL="${MODEL:-/etc/beamwarden/model.awk}"
@@ -91,11 +94,13 @@ cmd_watch() {
 			verdict=0; hits=0        # link idle -> nothing to attack; don't evaluate
 		elif [ $use_model = 1 ]; then
 			# 8 relative features in model order, then walk the forest
-			# model features: retry/PER/RSSI (throughput dropped - demand-confounded)
-			verdict=$(awk -v r=$r -v p=$p -v rssi=$rssi \
-				-v rm=$rm -v rsd=$rsd -v pm=$pm -v psd=$psd -v rsm=$rsm -v rssd=$rssd 'BEGIN{
-				e=1e-6; printf "%.6g %.6g %.6g %.6g %.6g %.6g\n",
-					r/(rm+e),(r-rm)/(rsd+e), p/(pm+e),(p-pm)/(psd+e), rssi/(rsm+e),(rssi-rsm)/(rssd+e) }' | awk -f "$MODEL")
+			# model features: retry/PER/throughput/RSSI (throughput is valid here -
+			# the load gate above guarantees we only score comparable heavy load)
+			verdict=$(awk -v r=$r -v p=$p -v t=$t -v rssi=$rssi \
+				-v rm=$rm -v rsd=$rsd -v pm=$pm -v psd=$psd -v tm=$tm -v tsd=$tsd -v rsm=$rsm -v rssd=$rssd 'BEGIN{
+				e=1e-6; printf "%.6g %.6g %.6g %.6g %.6g %.6g %.6g %.6g\n",
+					r/(rm+e),(r-rm)/(rsd+e), p/(pm+e),(p-pm)/(psd+e),
+					t/(tm+e),(t-tm)/(tsd+e), rssi/(rsm+e),(rssi-rsm)/(rssd+e) }' | awk -f "$MODEL")
 		else
 			thr=$(awk -v b=$rm -v m=$RETRY_MULT -v fl=$RETRY_FLOOR 'BEGIN{x=b*m; if(x<fl)x=fl; print x}')
 			verdict=$(awk -v r=$r -v thr=$thr 'BEGIN{print (r>thr)?1:0}')
