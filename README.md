@@ -17,6 +17,31 @@ detector — without touching the Wi-Fi protocol itself.
 
 ---
 
+> 📖 **Just want to install and use it?** Jump to the
+> **[User Guide](docs/user-guide.md)** — step-by-step, with screenshots.
+
+## Contents
+
+- [How it runs — two tiers](#how-it-runs--two-tiers) · the router detector vs. the dashboard
+- [Status at a glance](#status-at-a-glance) · objective-by-objective, honest
+- [1. What beamforming is (and why BFI exists)](#1-what-beamforming-is-and-why-bfi-exists)
+- [2. Beamforming across Wi-Fi versions](#2-beamforming-across-wi-fi-versions)
+- [3. The math: how BFI is decoded](#3-the-math-how-bfi-is-decoded)
+- [4. The attack: forging BFI (BeamCraft)](#4-the-attack-forging-bfi-beamcraft)
+- [5. System architecture (attack + detection)](#5-system-architecture-attack--detection)
+- [6. Gate 2 finding — the target speaks HE, not VHT](#6-gate-2-finding--the-target-speaks-he-not-vht)
+- [7. Detection pipeline (Objective 2 → 3)](#7-detection-pipeline-objective-2--3)
+- [8. Tools](#8-tools)
+- [9. Command Center (Mission Control) — how to use](#9-command-center-mission-control--how-to-use)
+- [10. Datasets](#10-datasets)
+- [11. Hardware & stack](#11-hardware--stack)
+- [12. Repo layout](#12-repo-layout)
+- [Team](#team) · [References](#references)
+
+**Other docs:** [User Guide](docs/user-guide.md) · [Live demo runbook](docs/gui-live-demo.md) · [ML engine](docs/ml-engine.md) · [Independent audit](docs/audit-2026-11-01/review.md) · [Router package README](openwrt/beamwarden/README.md)
+
+---
+
 ## How it runs — two tiers
 
 Beam Warden is **two separate pieces**. Know which is which:

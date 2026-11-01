@@ -19,9 +19,12 @@ so it runs on *anyone's* router.
 3. **Point it at your AP** — set `AP_IF` in `/etc/beamwarden.conf` (find it with `iw dev`).
 4. **Teach it your normal** (the important step):
    ```
-   beamwarden calibrate      # 2 min; use the network normally, no attack
+   beamwarden calibrate      # ~2 min; run it WHILE the Wi-Fi is in real use
    ```
-   It learns *this* network's baseline retry/PER. Nothing hard-coded to the lab.
+   Keep the attack **off** and the link **under normal load** (someone streaming or
+   downloading — not an idle link), because the detector only scores loaded windows.
+   It learns *this* network's baseline retry/PER/throughput/RSSI. Nothing hard-coded
+   to the lab; re-run it if the environment changes (new location/channel).
 5. **Protect**: `/etc/init.d/beamwarden enable && /etc/init.d/beamwarden start`
 6. **Watch**: `logread -e beamwarden -f`
    ```
