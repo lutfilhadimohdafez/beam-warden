@@ -103,3 +103,29 @@ A live hardware rehearsal is still required. The first read-only router probe in
 the development sandbox failed before connecting because SSH rejected permissions
 on `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf`. No attack was started by that
 probe.
+
+## Live rehearsal COMPLETE — 2026-11-02 (GUI-driven end-to-end)
+
+Rehearsed on the live AC2100 + Honor X9c rig via the dashboard GUI. The full
+chain fired and was verified: **Connect (mt76) → learn baseline → bounded attack
+bursts → detector verdict=1 → ALARM → Telegram delivered** (stamp advanced, which
+`on_alert` writes only on Telegram `"ok":true`). Four bounded injection runs, zero
+laptop crashes (the 12 s-burst / 60 s-timeout design held).
+
+### Gotchas found (do these or the demo fails)
+1. **Connect FIRST.** The Guided Live Demo refuses (`409 "Connect the router in
+   Live mode using the OpenWrt / mt76 profile first"`) until you select the mt76
+   profile on the **Dashboard** tab and click **Connect** — that sets the live
+   session and `driver=mt76`. Launching `dashboard.py --mode live` alone is not
+   enough; without the mt76 driver the backend uses telnet and shows
+   `[Errno 111] Connection refused`.
+2. **Phone iperf3 server must be live.** Preflight runs `iperf3 -c <phone> -t 1`;
+   if the Termux server is hung the demo aborts (`timed out after 10 s`). ADB
+   canNOT restart it (no root; Termux SSH may be down; RUN_COMMAND disabled), so
+   restart it on the phone: Termux → `pkill iperf3; iperf3 -s`. Keep it running.
+3. **Detection tuning (now the defaults).** A beam-steer attack collapses
+   throughput, pushing its windows *below* the 3000-pkt activity gate — so with
+   the old `LOAD_GRACE_WINDOWS=0` they were read as idle and missed. Set
+   `LOAD_GRACE_WINDOWS=10` (score collapse windows that follow heavy load) and
+   `HITS_TO_ALARM=2` (alarm on 2 consecutive). Both are now the shipped
+   `beamwarden.conf` defaults; the alarm fired reliably with them.
