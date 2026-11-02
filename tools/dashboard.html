@@ -324,6 +324,12 @@
   .session-field select { min-width: 180px; cursor: pointer; }
   .session-field input:focus,
   .session-field select:focus { border-color: var(--border-light); }
+  /* compact detector-sensitivity slider — fixed width so it sits inline on the
+     router-profile row instead of stretching full-width (3 discrete steps). */
+  .session-field input.gate-slider {
+    width: 132px; min-width: 132px; padding: 0; border: none;
+    background: transparent; align-self: center; cursor: pointer; margin-top: 4px;
+  }
   .session-start-btn {
     font-family: var(--font-display);
     font-size: 0.64rem;
@@ -1531,14 +1537,13 @@
           <input id="sessionBfiIface" value="" placeholder="mon0">
           <span style="font-family:var(--font-mono);font-size:0.52rem;color:var(--muted-dim);margin-top:2px;">off-air CSI; needs monitor mode (Command Center → Setup Monitor)</span>
         </div>
+        <div class="session-field" id="gateField" title="Detector load gate (ACTIVE_MIN_PKTS) on the router — Low 3000 / Med 2000 / High 1500; higher = fewer false positives">
+          <label>Sensitivity &middot; gate <span id="gateNum" style="font-family:var(--font-mono);color:var(--accent);font-weight:700;">&mdash;</span></label>
+          <input type="range" id="gateSlider" class="gate-slider" min="0" max="2" step="1" value="0">
+        </div>
         <button class="session-start-btn" id="sessionLiveConnect">Connect</button>
       </div>
       <div class="session-status" id="sessionStatus">no session &mdash; pick a source</div>
-      <div class="session-field" id="gateField" style="margin-left:auto;" title="Detector load gate (ACTIVE_MIN_PKTS) on the router — higher = fewer false positives">
-        <label>Detector sensitivity &middot; gate <span id="gateNum" style="font-family:var(--font-mono);color:var(--accent);font-weight:700;">&mdash;</span></label>
-        <input type="range" id="gateSlider" min="0" max="2" step="1" value="0" style="cursor:pointer;">
-        <span style="font-family:var(--font-mono);font-size:0.52rem;color:var(--muted-dim);">Low 3000 &middot; Med 2000 &middot; High 1500 &nbsp;(higher = fewer false positives)</span>
-      </div>
     </div>
     <script>
     (function(){

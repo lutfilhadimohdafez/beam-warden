@@ -201,6 +201,21 @@ def test_gate_level_mapping():
     print("  PASS: _gate_level nearest-preset mapping")
 
 
+def test_gate_slider_markup():
+    """Regression (the full-width/dead-slider bug): the gate slider must carry the
+    compact .gate-slider class with a fixed width, and live INSIDE the live
+    router-profile row (#sessionLiveFields, before Connect) — not as a full-width
+    block dumped straight in .session-bar."""
+    html = (Path(__file__).resolve().parent / "dashboard.html").read_text()
+    assert 'class="gate-slider"' in html, "slider missing compact .gate-slider class"
+    assert "input.gate-slider" in html and "132px" in html, "fixed-width CSS rule missing"
+    i_live = html.index('id="sessionLiveFields"')
+    i_gate = html.index('id="gateField"')
+    i_conn = html.index('id="sessionLiveConnect"')
+    assert i_live < i_gate < i_conn, "gate field must sit on the router-profile row, before Connect"
+    print("  PASS: gate slider compact + on router-profile row")
+
+
 if __name__ == "__main__":
     print("Mission Control self-check:")
     test_tasks_returns_registry()
@@ -209,4 +224,5 @@ if __name__ == "__main__":
     test_loopback_guard()
     test_update_rig_conf()
     test_gate_level_mapping()
+    test_gate_slider_markup()
     print("ALL CHECKS PASSED")
