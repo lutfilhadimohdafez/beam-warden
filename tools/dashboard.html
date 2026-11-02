@@ -1534,7 +1534,30 @@
         <button class="session-start-btn" id="sessionLiveConnect">Connect</button>
       </div>
       <div class="session-status" id="sessionStatus">no session &mdash; pick a source</div>
+      <div class="session-field" id="gateField" style="margin-left:auto;" title="Detector load gate (ACTIVE_MIN_PKTS) on the router — higher = fewer false positives">
+        <label>Detector sensitivity &middot; gate <span id="gateNum" style="font-family:var(--font-mono);color:var(--accent);font-weight:700;">&mdash;</span></label>
+        <input type="range" id="gateSlider" min="0" max="2" step="1" value="0" style="cursor:pointer;">
+        <span style="font-family:var(--font-mono);font-size:0.52rem;color:var(--muted-dim);">Low 3000 &middot; Med 2000 &middot; High 1500 &nbsp;(higher = fewer false positives)</span>
+      </div>
     </div>
+    <script>
+    (function(){
+      var LEVELS=[["low",3000],["medium",2000],["high",1500]];
+      var sl=document.getElementById("gateSlider"), num=document.getElementById("gateNum");
+      if(!sl||!num) return;
+      function nearestIdx(v){var b=0,bd=1e9;for(var i=0;i<LEVELS.length;i++){var d=Math.abs(LEVELS[i][1]-v);if(d<bd){bd=d;b=i;}}return b;}
+      fetch("/gate").then(function(r){return r.json();}).then(function(d){
+        if(d&&d.ok){sl.value=String(nearestIdx(d.value));num.textContent=d.value;}
+        else{num.textContent="n/a";}
+      }).catch(function(){num.textContent="n/a";});
+      sl.addEventListener("change",function(){
+        var pair=LEVELS[parseInt(sl.value,10)||0];num.textContent="…";
+        fetch("/gate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({level:pair[0]})})
+          .then(function(r){return r.json();}).then(function(d){num.textContent=(d&&d.ok)?d.value:"err";})
+          .catch(function(){num.textContent="err";});
+      });
+    })();
+    </script>
 
     <!-- ERROR BAR -->
     <div class="error-bar" id="errorBar"></div>
@@ -1661,18 +1684,94 @@
   <!-- ======== COMMAND CENTER TAB ======== -->
   <div class="tab-section" id="tab-command-center">
 
-    <section class="mc-section" aria-label="Guided live demo">
-      <div class="section-label">GUIDED LIVE DEMO <span id="demoStage" role="status">IDLE</span></div>
-      <p class="mc-hint">Keep the phone connected and stationary, with <code>iperf3 -s</code> running in Termux. Connect the configured OpenWrt / mt76 router above, then start. Preparation and attack run automatically; allow about 3 minutes.</p>
-      <div class="mc-params" style="align-items:end;margin:12px 0;">
-        <div class="mc-param"><label for="demoPower">Preferred AP power (mBm; 550 = 5.5 dBm)</label><input id="demoPower" type="number" min="0" max="2000" step="1" value="550"></div>
+    <!-- TARGET SETTINGS (moved to top; the guided demo + all commands follow these) -->
+    <div class="section-label stagger">TARGET SETTINGS <span class="mc-hint" style="font-weight:400;letter-spacing:0;text-transform:none;">the guided demo &amp; commands follow these fields</span></div>
+    <div class="mc-section stagger">
+      <div class="mc-params">
+        <div class="mc-param">
+          <label>Monitor Iface</label>
+          <input id="mcMon" value="mon0" placeholder="mon0">
+        </div>
+        <div class="mc-param">
+          <label>Channel</label>
+          <input id="mcChannel" value="auto" placeholder="auto or 36">
+        </div>
+        <div class="mc-param">
+          <label>Bandwidth</label>
+          <select id="mcBw" style="width:100%;">
+            <option value="20" selected>20 MHz</option>
+            <option value="40">40 MHz</option>
+            <option value="80">80 MHz</option>
+          </select>
+        </div>
+        <div class="mc-param">
+          <label>AP BSSID
+            <button type="button" id="mcScanAps"
+              style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan AP</button>
+          </label>
+          <input id="mcAp" value="5c:02:14:0e:e1:c5" placeholder="5c:02:14:0e:e1:c5">
+          <select id="mcApList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
+        </div>
+        <div class="mc-param">
+          <label>Victim MAC
+            <button type="button" id="mcScanVictims"
+              style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan air</button>
+          </label>
+          <input id="mcVictim" value="16:0f:02:1d:91:42" placeholder="16:0f:02:1d:91:42">
+          <select id="mcVictimList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
+        </div>
+        <div class="mc-param">
+          <label>Victim IP (iperf3 -s)</label>
+          <input id="mcVictimIp" value="192.168.1.105" placeholder="192.168.1.105">
+        </div>
+        <div class="mc-param">
+          <label>Attack Load Cap (Mbps)</label>
+          <input id="mcBitrate" value="" placeholder="blank = unleash">
+        </div>
+        <div class="mc-param">
+          <label>Alpha <span class="mc-val" id="mcAlphaVal">1.0</span></label>
+          <input type="range" id="mcAlpha" min="0" max="1" step="0.05" value="1.0">
+          <span class="mc-hint">0 = off (honest feedback) &middot; 1 = max disruption (beam steered 90&deg; wrong)</span>
+        </div>
+        <div class="mc-param">
+          <label>Offset</label>
+          <input id="mcOffset" value="33" placeholder="33">
+        </div>
+        <div class="mc-param">
+          <label>Type</label>
+          <input id="mcType" value="0xe0" placeholder="0xe0">
+        </div>
+        <div class="mc-param">
+          <label>CSV Path</label>
+          <input id="mcCsv" value="data/normal_iperf.csv" placeholder="data/normal_iperf.csv">
+        </div>
+        <div class="mc-param">
+          <label>PCAP Path</label>
+          <input id="mcPcap" value="" placeholder="path/to/file.pcap">
+        </div>
+        <div class="mc-param">
+          <label>Output Path</label>
+          <input id="mcOut" value="" placeholder="path/to/out.csv">
+        </div>
+        <div class="mc-param">
+          <label>Run Name</label>
+          <input id="mcRun" value="" placeholder="run_001">
+        </div>
+      </div>
+    </div>
+
+    <!-- GUIDED LIVE DEMO (compact; sits with the commands, no longer a page-eating hero) -->
+    <div class="section-label stagger">GUIDED LIVE DEMO <span id="demoStage" role="status">IDLE</span></div>
+    <div class="mc-section stagger" aria-label="Guided live demo">
+      <div class="mc-params" style="align-items:end;margin:4px 0 8px;">
+        <div class="mc-param"><label for="demoPower">AP power (mBm; 550 = 5.5 dBm)</label><input id="demoPower" type="number" min="0" max="2000" step="1" value="550"></div>
         <button type="button" class="mc-btn run" id="demoStart">Prepare + run live demo</button>
         <button type="button" class="mc-btn stop" id="demoStop" disabled>Stop demo</button>
       </div>
-      <p id="demoMessage" class="mc-hint" aria-live="polite">Checks → adapter setup → fresh calibration → monitoring → measured attack. The main dashboard shows a local ML estimate; router alerts are confirmed separately below.</p>
+      <p class="mc-hint">Follows the <b>Target Settings</b> above + a fresh calibration, then runs bounded attack bursts (~3 min). Phone stationary with <code>iperf3 -s</code> in Termux. Accepted power returns to auto afterward.</p>
+      <p id="demoMessage" class="mc-hint" aria-live="polite">Checks &rarr; calibrate &rarr; monitor &rarr; measured attack.</p>
       <p id="demoAlert" class="mc-hint">Router alert: none observed for this run.</p>
-      <p class="mc-hint">If fixed power is unsupported, the demo keeps the current AP power and calibrates there. Command Center reports the driver’s actual power. An accepted power setting returns to auto afterward; otherwise power stays unchanged. The demo watcher stops afterward. Administrator prompts appear on this computer. Detection depends on a measurable attack effect; Telegram delivery must be checked on your phone.</p>
-    </section>
+    </div>
 
 
     <!-- TELEGRAM ALERTS -->
@@ -1771,77 +1870,6 @@
     <!-- MISSION CONTROL -->
     <div class="section-label stagger">MISSION CONTROL <span id="mcMonStatus" style="font-family:var(--font-mono);font-size:0.56rem;font-weight:600;letter-spacing:0.04em;margin-left:8px;color:var(--muted-dim);"></span></div>
     <div class="mc-section stagger">
-      <div class="mc-params">
-        <div class="mc-param">
-          <label>Monitor Iface</label>
-          <input id="mcMon" value="mon0" placeholder="mon0">
-        </div>
-        <div class="mc-param">
-          <label>Channel</label>
-          <input id="mcChannel" value="auto" placeholder="auto or 36">
-        </div>
-        <div class="mc-param">
-          <label>Bandwidth</label>
-          <select id="mcBw" style="width:100%;">
-            <option value="20" selected>20 MHz</option>
-            <option value="40">40 MHz</option>
-            <option value="80">80 MHz</option>
-          </select>
-        </div>
-        <div class="mc-param">
-          <label>AP BSSID
-            <button type="button" id="mcScanAps"
-              style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan AP</button>
-          </label>
-          <input id="mcAp" value="5c:02:14:0e:e1:c5" placeholder="5c:02:14:0e:e1:c5">
-          <select id="mcApList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
-        </div>
-        <div class="mc-param">
-          <label>Victim MAC
-            <button type="button" id="mcScanVictims"
-              style="margin-left:6px;font-family:var(--font-mono);font-size:0.5rem;padding:1px 6px;cursor:pointer;background:var(--accent,#4fc3f7);color:#111;border:none;border-radius:3px;">scan air</button>
-          </label>
-          <input id="mcVictim" value="16:0f:02:1d:91:42" placeholder="16:0f:02:1d:91:42">
-          <select id="mcVictimList" style="display:none;margin-top:4px;width:100%;font-family:var(--font-mono);font-size:0.6rem;"></select>
-        </div>
-        <div class="mc-param">
-          <label>Victim IP (iperf3 -s)</label>
-          <input id="mcVictimIp" value="192.168.1.105" placeholder="192.168.1.105">
-        </div>
-        <div class="mc-param">
-          <label>Attack Load Cap (Mbps)</label>
-          <input id="mcBitrate" value="" placeholder="blank = unleash">
-        </div>
-        <div class="mc-param">
-          <label>Alpha <span class="mc-val" id="mcAlphaVal">1.0</span></label>
-          <input type="range" id="mcAlpha" min="0" max="1" step="0.05" value="1.0">
-          <span class="mc-hint">0 = off (honest feedback) &middot; 1 = max disruption (beam steered 90&deg; wrong)</span>
-        </div>
-        <div class="mc-param">
-          <label>Offset</label>
-          <input id="mcOffset" value="33" placeholder="33">
-        </div>
-        <div class="mc-param">
-          <label>Type</label>
-          <input id="mcType" value="0xe0" placeholder="0xe0">
-        </div>
-        <div class="mc-param">
-          <label>CSV Path</label>
-          <input id="mcCsv" value="data/normal_iperf.csv" placeholder="data/normal_iperf.csv">
-        </div>
-        <div class="mc-param">
-          <label>PCAP Path</label>
-          <input id="mcPcap" value="" placeholder="path/to/file.pcap">
-        </div>
-        <div class="mc-param">
-          <label>Output Path</label>
-          <input id="mcOut" value="" placeholder="path/to/out.csv">
-        </div>
-        <div class="mc-param">
-          <label>Run Name</label>
-          <input id="mcRun" value="" placeholder="run_001">
-        </div>
-      </div>
       <div><span id="mcGeoBadge" class="geo-badge">Geometry: &mdash;</span></div>
       <div class="mc-grid" id="mcGrid">
         <div style="color:var(--muted);font-family:var(--font-mono);font-size:0.72rem;">Loading tasks&hellip;</div>
@@ -2604,7 +2632,11 @@
     this.disabled = true;
     fetch("/run/live_demo", {method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({demo_power:document.getElementById("demoPower").value,
-        mon:document.getElementById("mcMon").value.trim() || "mon0"})
+        mon:document.getElementById("mcMon").value.trim() || "mon0",
+        channel:document.getElementById("mcChannel").value.trim(),
+        victim:document.getElementById("mcVictim").value.trim(),
+        victim_ip:document.getElementById("mcVictimIp").value.trim(),
+        ap:document.getElementById("mcAp").value.trim()})
     }).then(function(r){return r.json();}).then(function(d){
       if (!d.ok) updateDemo({stage:"failed", message:d.error || "Could not start demo"});
     }).catch(function(e){updateDemo({stage:"failed",message:"Connection failed: " + e});});

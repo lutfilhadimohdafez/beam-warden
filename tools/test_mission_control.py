@@ -178,10 +178,35 @@ def test_loopback_guard():
     print("  PASS: loopback guard correctly rejects non-loopback")
 
 
+def test_update_rig_conf():
+    """_update_rig_conf replaces only the named keys, preserves comments/order, appends new."""
+    p = Path(tempfile.gettempdir()) / "rig_conf_fixture.conf"
+    p.write_text("# comment\nROUTER_CHANNEL=36\nVICTIM_MAC=aa:bb:cc:dd:ee:ff\nKEEP=1\n")
+    dashboard._update_rig_conf({"ROUTER_CHANNEL": "153", "NEW_KEY": "x"}, path=p)
+    out = p.read_text()
+    assert "ROUTER_CHANNEL=153" in out and "ROUTER_CHANNEL=36" not in out, "channel not replaced"
+    assert "VICTIM_MAC=aa:bb:cc:dd:ee:ff" in out, "untouched key lost"
+    assert "KEEP=1" in out and "# comment" in out, "comment/other line lost"
+    assert "NEW_KEY=x" in out, "new key not appended"
+    p.unlink()
+    print("  PASS: _update_rig_conf surgical replace + append")
+
+
+def test_gate_level_mapping():
+    """Sensitivity label maps to the nearest preset gate value."""
+    assert dashboard._gate_level(3000) == "low"
+    assert dashboard._gate_level(2000) == "medium"
+    assert dashboard._gate_level(1500) == "high"
+    assert dashboard._gate_level(1600) == "high", "nearest should win"
+    print("  PASS: _gate_level nearest-preset mapping")
+
+
 if __name__ == "__main__":
     print("Mission Control self-check:")
     test_tasks_returns_registry()
     test_run_unknown_rejected()
     test_run_echo_streams_to_websocket()
     test_loopback_guard()
+    test_update_rig_conf()
+    test_gate_level_mapping()
     print("ALL CHECKS PASSED")

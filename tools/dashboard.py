@@ -9,6 +9,7 @@ ponytail: one module, one producer task, one broadcast loop. keep it flat.
 import argparse
 import asyncio
 import csv
+import ipaddress
 import json
 import os
 import re
@@ -752,11 +753,21 @@ async def _producer_bfi_detect_replay(pcap: str, phases_path: str) -> None:
         await asyncio.sleep(0.25)
 
 
-# ── task runner: localhost guard ───────────────────────────────────────────
+# ── task runner: localhost + tailnet guard ──────────────────────────────────
+# ponytail: tailnet = Tailscale CGNAT 100.64/10. Trusts the whole tailnet, not
+# the open internet — widen to specific peer IPs if the tailnet ever grows.
+_TAILNET = ipaddress.ip_network("100.64.0.0/10")
+
+
 def _is_loopback(request: Request) -> bool:
-    """Return True if the request came from a loopback address."""
+    """Return True for loopback or same-tailnet (Tailscale) requests."""
     host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost", "testclient")
+    if host in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return True
+    try:
+        return ipaddress.ip_address(host) in _TAILNET
+    except ValueError:
+        return False
 
 
 async def _tasks_endpoint(request: Request) -> JSONResponse:
@@ -808,6 +819,37 @@ async def _run_endpoint(request: Request) -> JSONResponse:
         mon = params.get("mon", "mon0")
         if not isinstance(mon, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,15}", mon):
             return JSONResponse({"error": "Invalid monitor interface."}, status_code=400)
+        # SYNC: push Mission Control target settings into rig.conf before the run —
+        # the guided demo reads rig.conf, so the GUI drives it (no manual edit).
+        # Blank (or 'auto' channel) keeps the current rig.conf value.
+        _MAC_RE = r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}"
+        rig_updates: dict = {}
+        _chan = str(params.get("channel", "")).strip()
+        if _chan and _chan.lower() != "auto":
+            if not re.fullmatch(r"\d{1,3}", _chan):
+                return JSONResponse({"error": "Mission Control Channel must be a number or 'auto'."}, status_code=400)
+            rig_updates["ROUTER_CHANNEL"] = _chan
+        _vmac = str(params.get("victim", "")).strip()
+        if _vmac:
+            if not re.fullmatch(_MAC_RE, _vmac):
+                return JSONResponse({"error": "Mission Control Victim MAC is invalid."}, status_code=400)
+            rig_updates["VICTIM_MAC"] = _vmac.lower()
+        _vip = str(params.get("victim_ip", "")).strip()
+        if _vip:
+            if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", _vip):
+                return JSONResponse({"error": "Mission Control Victim IP is invalid."}, status_code=400)
+            rig_updates["VICTIM_IP"] = _vip
+        _ap = str(params.get("ap", "")).strip()
+        if _ap:
+            if not re.fullmatch(_MAC_RE, _ap):
+                return JSONResponse({"error": "Mission Control AP BSSID is invalid."}, status_code=400)
+            rig_updates["ROUTER_AP_BSSID"] = _ap.lower()
+        if rig_updates:
+            try:
+                _update_rig_conf(rig_updates)
+                RIG.update(rig_updates)  # keep this process consistent with the file
+            except OSError as exc:
+                return JSONResponse({"error": f"Could not write rig.conf: {exc}"}, status_code=500)
         params = {"mon": mon, "demo_power": str(power)}
         DEMO_PROGRESS.clear()
         DEMO_PROGRESS.update(type="demo", stage="authorising", message="Approve the desktop administrator prompt to begin.", alert=False)
@@ -2191,6 +2233,81 @@ async def _telegram_save(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": str(exc)[:200]})
 
 
+# ── rig.conf sync + detector-gate control ─────────────────────────────────
+_RIG_PATH = Path(__file__).resolve().parent.parent / "rig.conf"
+
+
+def _update_rig_conf(updates: dict, path: Path | None = None) -> None:
+    """Replace only the given KEY=value lines in rig.conf, preserving comments and
+    order; append keys that are absent. Lets the dashboard push Mission Control
+    target settings into rig.conf so the guided demo (which reads rig.conf) follows
+    the GUI instead of a manual edit."""
+    p = path or _RIG_PATH
+    lines = p.read_text().splitlines() if p.exists() else []
+    seen, out = set(), []
+    for line in lines:
+        s = line.strip()
+        if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() in updates:
+            k = s.split("=", 1)[0].strip()
+            out.append(f"{k}={updates[k]}")
+            seen.add(k)
+        else:
+            out.append(line)
+    for k, v in updates.items():
+        if k not in seen:
+            out.append(f"{k}={v}")
+    p.write_text("\n".join(out) + "\n")
+
+
+# Detector load-gate (ACTIVE_MIN_PKTS) sensitivity presets. HIGHER gate = only
+# score heavy-load windows = FEWER false positives (less sensitive); LOWER is more
+# sensitive but risks moderate-load FPs (2026-11-02: 1500 FP'd on a weak link).
+_GATE_LEVELS = {"low": 3000, "medium": 2000, "high": 1500}
+
+
+def _gate_level(val: int) -> str:
+    return min(_GATE_LEVELS, key=lambda k: abs(_GATE_LEVELS[k] - val))
+
+
+async def _gate_get(request: Request) -> JSONResponse:
+    """GET /gate — the router's current ACTIVE_MIN_PKTS + nearest sensitivity level."""
+    def _read():
+        with SSHConn(args.host, args.user, args.password) as c:
+            return c.run(". /etc/beamwarden.conf 2>/dev/null; echo ${ACTIVE_MIN_PKTS:-3000}")
+    try:
+        out = await asyncio.to_thread(_read)
+        val = int((out or "3000").split()[-1])
+        return JSONResponse({"ok": True, "value": val, "level": _gate_level(val)})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+
+
+async def _gate_set(request: Request) -> JSONResponse:
+    """POST /gate {level|value} — set ACTIVE_MIN_PKTS on the router + restart watcher."""
+    body = await request.json()
+    if body.get("level") in _GATE_LEVELS:
+        val = _GATE_LEVELS[body["level"]]
+    else:
+        try:
+            val = int(body.get("value"))
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": "need level (low/medium/high) or value (int)"}, status_code=400)
+    if not 200 <= val <= 20000:
+        return JSONResponse({"ok": False, "error": "gate must be 200–20000 frames/window"}, status_code=400)
+    cmd = ("sed -i '/^ACTIVE_MIN_PKTS=/d' /etc/beamwarden.conf 2>/dev/null; "
+           f"echo 'ACTIVE_MIN_PKTS={val}' >> /etc/beamwarden.conf; "
+           "/etc/init.d/beamwarden restart 2>/dev/null; echo ok")
+
+    def _set():
+        with SSHConn(args.host, args.user, args.password) as c:
+            return c.run(cmd)
+    try:
+        out = await asyncio.to_thread(_set)
+        return JSONResponse({"ok": "ok" in (out or ""), "value": val, "level": _gate_level(val)})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+
+
 async def _ws_handler(websocket: WebSocket) -> None:
     await websocket.accept()
     clients.add(websocket)
@@ -2261,6 +2378,8 @@ app = Starlette(
         Route("/telegram/profile", _telegram_profile, methods=["GET"]),
         Route("/telegram/test", _telegram_test, methods=["POST"]),
         Route("/telegram/save", _telegram_save, methods=["POST"]),
+        Route("/gate", _gate_get, methods=["GET"]),
+        Route("/gate", _gate_set, methods=["POST"]),
         Route("/tasks", _tasks_endpoint),
         Route("/replay-files", _replay_files_endpoint),
         Route("/session", _session_endpoint, methods=["POST"]),
