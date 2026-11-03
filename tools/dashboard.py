@@ -308,6 +308,7 @@ async def _replay_broadcast_current() -> None:
 # ── producer: live mode ───────────────────────────────────────────────────
 _RIG_BASELINE: list | None = None
 DEMO_PROGRESS = {"type": "demo", "stage": "idle", "message": "Connect the configured router, then start the guided live demo.", "alert": False}
+MONITOR_MAC = ""   # which client the per-client charts/hero track; "" = first STA in the dump
 _DEMO_CONFLICTS = {"live_demo", "setup_monitor", "reset_monitor", "recover_monitor", "restore_intel", "capture_bfi", "start_attack", "throughput_test"}
 _MODEL_AWK = Path(__file__).resolve().parent.parent / "openwrt" / "beamwarden" / "files" / "model.awk"
 
@@ -381,6 +382,7 @@ async def _producer_live() -> None:
     ont = None
     prev: dict | None = None
     prev_t: float | None = None
+    prev_tot: tuple | None = None   # (iface tx_bytes, rx_bytes) for TOTAL radio throughput
     client_ctr = 0
 
     while True:
@@ -394,12 +396,23 @@ async def _producer_live() -> None:
                 await asyncio.to_thread(ont.__enter__)
 
             tick = time.time()
+            tot_tx = tot_rx = 0   # iface-level byte counters = TOTAL radio throughput (all clients)
+            mon = MONITOR_MAC     # chosen client to track ("" = first STA)
+            mon_present = True
             if mt76:
                 # ImmortalWrt / open mt76: no iwpriv. station dump carries RSSI,
                 # MCS, retries AND byte counters, so no read_iface_bytes override.
                 text = await asyncio.to_thread(
                     ont.run, f"iw dev {args.iface} station dump")
-                parsed = await asyncio.to_thread(parse_iw_station_dump, text)
+                try:
+                    parsed = await asyncio.to_thread(parse_iw_station_dump, text, mon)
+                except ValueError:
+                    # chosen client not associated this tick -> zeros, flagged absent
+                    parsed = await asyncio.to_thread(parse_iw_station_dump, "")
+                    mon_present = False
+                if not mon:
+                    mon_present = bool(parsed.get("station_mac"))
+                tot_tx, tot_rx = await asyncio.to_thread(read_iface_bytes, ont, args.iface)
             else:
                 text = await asyncio.to_thread(ont.run, f"iwpriv {args.iface} stat")
                 parsed = await asyncio.to_thread(parse_iwpriv_stat, text)
@@ -408,9 +421,18 @@ async def _producer_live() -> None:
                     parsed["bytes_sent"] = tx_b
                 if rx_b:
                     parsed["bytes_recv"] = rx_b
+                tot_tx, tot_rx = tx_b, rx_b
             now = time.time()
 
-            if prev is not None and prev_t is not None:
+            # TOTAL wireless throughput: sum of iface tx+rx byte deltas over the
+            # interval (every client on the radio, not just the monitored one).
+            total_tput_mbps = 0.0
+            if prev_tot is not None and prev_t is not None:
+                dtt = now - prev_t
+                if dtt > 0 and tot_tx >= prev_tot[0] and tot_rx >= prev_tot[1]:
+                    total_tput_mbps = ((tot_tx - prev_tot[0]) + (tot_rx - prev_tot[1])) * 8 / dtt / 1e6
+
+            if prev is not None and prev_t is not None and mon_present:
                 dt = now - prev_t
                 deltas = compute_deltas(prev, parsed, dt) if dt > 0 else {}
             else:
@@ -438,6 +460,9 @@ async def _producer_live() -> None:
                 temp_c=parsed["temp_c"],
             )
             msg["raw"] = text
+            msg["total_tput_mbps"] = round(total_tput_mbps, 3)
+            msg["monitored_mac"] = parsed.get("station_mac") or mon or ""
+            msg["monitored_present"] = mon_present
             # refresh connected-clients list every ~7 ticks on the SAME conn (no 2nd session)
             global _latest_clients
             client_ctr += 1
@@ -483,8 +508,9 @@ async def _producer_live() -> None:
                 msg["detect_verdict"] = None
             await _broadcast(msg)
 
-            prev = parsed
+            prev = parsed if mon_present else None   # absent -> no stale delta on return
             prev_t = now
+            prev_tot = (tot_tx, tot_rx)
             elapsed = time.time() - tick
             await asyncio.sleep(max(0.0, args.interval - elapsed))
 
@@ -850,6 +876,10 @@ async def _run_endpoint(request: Request) -> JSONResponse:
                 RIG.update(rig_updates)  # keep this process consistent with the file
             except OSError as exc:
                 return JSONResponse({"error": f"Could not write rig.conf: {exc}"}, status_code=500)
+        # Dashboard per-client charts must follow whoever the demo is attacking,
+        # so the throughput drop is always on the chart the operator is watching.
+        global MONITOR_MAC
+        MONITOR_MAC = (rig_updates.get("VICTIM_MAC") or RIG.get("VICTIM_MAC") or MONITOR_MAC)
         params = {"mon": mon, "demo_power": str(power)}
         DEMO_PROGRESS.clear()
         DEMO_PROGRESS.update(type="demo", stage="authorising", message="Approve the desktop administrator prompt to begin.", alert=False)
@@ -1124,6 +1154,8 @@ async def _session_endpoint(request: Request) -> JSONResponse:
         args.password = body.get("password", args.password)
         args.iface = body.get("iface", args.iface)
         args.driver = body.get("driver", getattr(args, "driver", "")) or ""
+        global MONITOR_MAC
+        MONITOR_MAC = (body.get("victim") or "").strip()   # default: track the victim
         # Quick pre-connect test before starting the producer
         try:
             await _test_router_connection(args.host, args.user, args.password,
@@ -2282,6 +2314,17 @@ async def _gate_get(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": str(exc)[:200]})
 
 
+async def _monitor_set(request: Request) -> JSONResponse:
+    """POST /monitor {mac} — choose which connected client the per-client charts track.
+    Empty mac -> first STA in the dump. Takes effect on the next live tick."""
+    if not _is_loopback(request):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    body = await request.json()
+    global MONITOR_MAC
+    MONITOR_MAC = (body.get("mac") or "").strip()
+    return JSONResponse({"ok": True, "mac": MONITOR_MAC})
+
+
 async def _gate_set(request: Request) -> JSONResponse:
     """POST /gate {level|value} — set ACTIVE_MIN_PKTS on the router + restart watcher."""
     body = await request.json()
@@ -2380,6 +2423,7 @@ app = Starlette(
         Route("/telegram/save", _telegram_save, methods=["POST"]),
         Route("/gate", _gate_get, methods=["GET"]),
         Route("/gate", _gate_set, methods=["POST"]),
+        Route("/monitor", _monitor_set, methods=["POST"]),
         Route("/tasks", _tasks_endpoint),
         Route("/replay-files", _replay_files_endpoint),
         Route("/session", _session_endpoint, methods=["POST"]),

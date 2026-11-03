@@ -397,6 +397,12 @@
   .clients-row .cmac { color: var(--accent); }
   .clients-row .cdev { color: var(--muted-dim); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.56rem; align-self: center; }
   .clients-row .cip { color: var(--muted); margin-left: auto; }
+  .clients-row .cmon { margin-left: 8px; font-family: var(--font-mono); font-size: 0.54rem;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+    background: transparent; border: 1px solid var(--border); padding: 2px 6px; cursor: pointer; }
+  .clients-row .cmon:hover { color: var(--text-bright); border-color: var(--accent); }
+  .clients-row.monitoring { border-color: var(--accent); }
+  .clients-row.monitoring .cmon { color: var(--accent); border-color: var(--accent); }
   .clients-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted-dim); padding: 4px 8px; }
   /* unavailable-feature marker (themed, no emoji) */
   .section-hint { font-family: var(--font-mono); font-size: 0.55rem; color: var(--muted-dim); font-weight: 400; letter-spacing: 0; }
@@ -1576,7 +1582,7 @@
     <!-- LEFT COLUMN -->
     <div class="dash-col dash-left">
       <div class="chart-card">
-        <div class="chart-title">TX Throughput (Mbps)</div>
+        <div class="chart-title">TX Throughput &middot; <span id="txTputClient">connect to monitor</span> (Mbps)</div>
         <div class="chart-wrap"><canvas id="chartTxTput"></canvas></div>
       </div>
       <div class="chart-card">
@@ -1600,7 +1606,7 @@
           </div>
           <div class="bfid-ro">
             <span class="bfid-ro-val" id="bfidRetry">&mdash;</span>
-            <span class="bfid-ro-lbl">throughput (Mbps)</span>
+            <span class="bfid-ro-lbl">downlink throughput (Mbps)</span>
           </div>
           <div class="bfid-ro">
             <span class="bfid-ro-val" id="bfidScore">&mdash;</span>
@@ -1679,7 +1685,7 @@
         <div class="chart-wrap"><canvas id="chartRssi"></canvas></div>
       </div>
       <div class="chart-card">
-        <div class="chart-title">BFI Rate (frames/s)</div>
+        <div class="chart-title">Total Wireless Throughput &middot; all clients (Mbps)</div>
         <div class="chart-wrap"><canvas id="chartAnomaly"></canvas></div>
       </div>
     </div>
@@ -2078,23 +2084,59 @@
     return OUI_MAP[oui] || (mac.slice(0, 8) + "…");  // vendor, else raw OUI prefix
   }
 
+  /* ---- monitored-client selection (which STA the per-client charts track) ---- */
+  var $txTputClient = document.getElementById("txTputClient");
+  var monitorSel = "";          // user's chosen MAC ("" = auto / first STA)
+  var _lastClients = [];
+  var monitoredMacLive = "";    // MAC the live feed is actually reporting
+  var monitoredPresent = null;
+  var liveSeen = false;
+  function updateTxTputTitle() {
+    if (!$txTputClient) return;
+    var t;
+    if (mode === "replay") t = "replay data";
+    else if (!liveSeen) t = "connect to monitor";
+    else if (monitoredPresent && monitoredMacLive) t = monitoredMacLive;
+    else if (monitorSel) t = monitorSel + " — not connected";
+    else t = "—";
+    $txTputClient.textContent = t;
+  }
+  function postMonitor(mac) {
+    monitorSel = mac || "";
+    fetch("/monitor", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mac: monitorSel }) }).catch(function () {});
+    renderClients(_lastClients);
+    updateTxTputTitle();
+  }
   function renderClients(list) {
     if (!$clientsList || !$clientsCount) return;
-    $clientsCount.textContent = list.length;
+    _lastClients = list || [];
+    $clientsCount.textContent = _lastClients.length;
     /* section ALWAYS visible (user: don't lose the Clients Connected block);
        empty -> clean placeholder instead of an underflowing void. */
     var $clientsLabel = document.getElementById("clientsLabel");
     if ($clientsLabel) $clientsLabel.style.display = "";
     $clientsList.style.display = "";
-    if (!list.length) {
+    if (!_lastClients.length) {
       $clientsList.innerHTML = '<div class="clients-empty">no clients connected</div>';
       return;
     }
-    $clientsList.innerHTML = list.map(function (c) {
-      return '<div class="clients-row"><span class="cmac">' + c.mac +
-        '</span><span class="cdev">' + deviceLabel(c.mac) +
-        '</span><span class="cip">' + (c.ip || "—") + '</span></div>';
+    $clientsList.innerHTML = _lastClients.map(function (c) {
+      var on = monitorSel && c.mac.toLowerCase() === monitorSel.toLowerCase();
+      return '<div class="clients-row' + (on ? ' monitoring' : '') + '">' +
+        '<span class="cmac">' + c.mac + '</span>' +
+        '<span class="cdev">' + deviceLabel(c.mac) + '</span>' +
+        '<span class="cip">' + (c.ip || "—") + '</span>' +
+        '<button type="button" class="cmon" data-mac="' + c.mac + '">' +
+        (on ? 'monitoring' : 'monitor') + '</button>' +
+        '</div>';
     }).join("");
+  }
+  if ($clientsList) {
+    $clientsList.addEventListener("click", function (e) {
+      var b = (e.target && e.target.closest) ? e.target.closest(".cmon") : null;
+      if (b && b.getAttribute("data-mac")) postMonitor(b.getAttribute("data-mac"));
+    });
   }
 
   /* ---- BFI / CSI visualization (phi/psi gauges + variance bars) ---- */
@@ -2294,10 +2336,13 @@
           if (d.ok) {
             liveConnected = false;
             setLiveBtn("idle");
+            liveSeen = false; monitoredMacLive = ""; updateTxTputTitle();
           }
         }).catch(function () {});
     } else {
       /* Connect */
+      monitorSel = (document.getElementById("mcVictim") ? document.getElementById("mcVictim").value.trim() : "");
+      liveSeen = false; monitoredMacLive = ""; updateTxTputTitle();
       setLiveBtn("connecting");
       postSession({
         source: "live",
@@ -2307,6 +2352,7 @@
         iface: document.getElementById("sessionIface").value.trim(),
         bfi_iface: document.getElementById("sessionBfiIface").value.trim(),
         driver: SELECTED_DRIVER || "",
+        victim: (document.getElementById("mcVictim") ? document.getElementById("mcVictim").value.trim() : ""),
       }).then(function (d) {
         if (d && d.ok) {
           liveConnected = true;
@@ -2424,22 +2470,13 @@
     type: "line",
     data: { labels: [], datasets: [
       {
-        label: "BFI frames/s",
+        label: "Total throughput (Mbps)",
         data: [],
         borderColor: "#3dd680",
         backgroundColor: "rgba(61,214,128,0.1)",
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.2,
-        fill: false
-      },
-      {
-        label: "Learned normal ceiling",
-        data: [],
-        borderColor: "rgba(255,255,255,0.15)",
-        borderWidth: 1,
-        borderDash: [5, 4],
-        pointRadius: 0,
         fill: false
       }
     ]},
@@ -2609,14 +2646,6 @@
       if (bfidSpark.length > 60) bfidSpark.shift();
     }
     drawBfidSpark();
-    /* feed the repurposed right-column chart with the real live BFI rate */
-    if (chartAnomaly && typeof d.bfi_rate === "number" && !isNaN(d.bfi_rate)) {
-      rollingPush(chartAnomaly.data.labels, new Date().toLocaleTimeString());
-      rollingPush(chartAnomaly.data.datasets[0].data, d.bfi_rate);
-      var _lb = (typeof learnCurrent === "function" && learnCurrent()) ? learnCurrent().normalHi : null;
-      rollingPush(chartAnomaly.data.datasets[1].data, _lb);
-      chartAnomaly.update("none");
-    }
     /* feed the Learning-tab calibration/verdict */
     learnOnSample(d.bfi_rate, d.retry1_count);
   }
@@ -2845,8 +2874,19 @@
     rollingPush(chartRssi.data.datasets[2].data, d.rssi2);
     rollingPush(chartRssi.data.datasets[3].data, d.rssi3);
 
-    /* BFI-rate chart is fed by the live bfi_detect stream in handleBfiDetect,
-       not by telemetry (the old anomaly-score series was removed). */
+    /* Total wireless throughput (all clients on the radio) — iface-level bytes
+       from the server; fed here every telemetry tick. */
+    rollingPush(chartAnomaly.data.labels, lbl);
+    rollingPush(chartAnomaly.data.datasets[0].data,
+      (typeof d.total_tput_mbps === "number" && !isNaN(d.total_tput_mbps)) ? d.total_tput_mbps : 0);
+
+    /* live monitored-client -> chart title (which STA the data is actually for) */
+    if (mode === "live") {
+      monitoredMacLive = d.monitored_mac || "";
+      monitoredPresent = (d.monitored_present !== false);
+      liveSeen = true;
+    }
+    updateTxTputTitle();
 
     trimCharts();
     allCharts.forEach(function (c) { c.update("none"); });

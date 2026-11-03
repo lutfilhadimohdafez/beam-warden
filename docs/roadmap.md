@@ -49,6 +49,30 @@ Snapshot of where things stand the night before the exhibition demo, and what's 
 - **E. NOC collector (the "server" tier)** — SQLite + a webhook: `on_alert` POSTs the
   same JSON to a `/ingest` endpoint → an `/events` dashboard page aggregates many
   routers. Then package it npm-style (`pipx` / Docker) for any Linux.
+- **E′. Per-client (per-MAC) monitoring** — today the detector is pinned to one victim
+  MAC (`beamwarden.conf:MAC`); the demo threat model is a single targeted client, so
+  that's correct for the viva. To protect *every* associated station, go **per-client,
+  NOT aggregate**: setting `MAC=` sums/averages across all STAs, which dilutes the
+  one-client attack signature and makes the baseline non-stationary (joins/leaves +
+  contention → constant false alarms — exactly the 3-stranger case on 2026-11-03).
+  Right way: iterate `iw station dump` per STA, keep a **per-MAC rolling baseline**, and
+  score each with the **same** forest (features are relative ratio+z, so the model
+  already transfers across stations — no retrain). Cost: per-MAC state + online
+  calibration (clients come/go) + N× the FP surface. Pairs naturally with the NOC tier.
+  - **Product goal:** make it *user-usable* — the system **auto-learns each device's
+    own network-normal** (per-device baseline, no manual calibrate step), so an operator
+    just adds a client and the ML adapts. The dashboard already names the monitored
+    client on the TX-throughput chart (`#txTputClient`, follows the Victim MAC) so a
+    viewer can't mistake one client's telemetry for an all-devices total.
+  - **Accuracy gap to close:** the dashboard's per-client charts feed from
+    `parse_iw_station_dump(text)` with **no MAC → `stations[0]`** (first STA in the
+    dump), not the victim. Accurate only when the victim is the sole client (locked
+    SSID). Pin the live feed to the Victim MAC so the "· <mac>" label is always true.
+    (The new **Total Wireless Throughput** chart, bottom-right, is correct regardless —
+    it reads iface-level byte counters = every client on the radio.)
+- **E″. Guided installation + usage guide** — a first-run onboarding flow (install the
+  `.ipk`, point it at the router, pick/scan the client to protect, auto-calibrate) plus
+  a short "how to use it" walkthrough, so it's deployable by someone who isn't us.
 - **F. LuCI router-hosted dashboard** — the proposal promised an on-router UI; the
   current dashboard is laptop-hosted (Codex gap). Optional, scope later.
 

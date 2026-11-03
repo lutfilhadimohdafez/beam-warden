@@ -72,13 +72,16 @@ def parse_iw_station_dump(text: str, mac: str = "") -> dict:
     """
     blocks = re.split(r'(?=^Station\s)', text, flags=re.MULTILINE)
     stations = [b for b in blocks if b.startswith('Station ')]
+    station_mac = ""
     if stations:
         if mac:
             stations = [b for b in stations if b.split()[1].lower() == mac.lower()]
             if not stations:
                 raise ValueError('Protected station is not associated')
         text = stations[0]
+        station_mac = stations[0].split()[1]
     d = dict(_DEFAULTS)
+    d["station_mac"] = station_mac   # which STA this telemetry is actually for
     tx_failed = 0          # the real 'tx failed' (dropped-after-retries) counter
     rx_drop_misc = 0
     for raw in text.splitlines():
