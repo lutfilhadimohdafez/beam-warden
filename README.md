@@ -92,6 +92,8 @@ Beam Warden is **two separate pieces**. Know which is which:
 | 2 | Automate PHY telemetry | ≥10 samples, ≥15% variance | 🟢 **live** — SSH `station dump` capture + real datasets + live dashboard; attack moves retry **5.4×** and throughput **−36%** (≫15% variance) |
 | 3 | ML anomaly detection | ≥55% accuracy | 🟢 **ACHIEVED — 100%** — BFI-storm anomaly detection on **real** data, leakage-safe GroupKFold (every fold 100%). *Within one condition*; cross-condition is honest future work. `tools/bfi_run.py` + `tools/bfi_features.py` |
 
+**Update 2026-11-04 (exhibition):** Demonstrated live at the FYP exhibition. The attack, the live dashboard, and the on-router detector all ran on real hardware in front of visitors, and the response was positive. The project is now open source in this repository.
+
 **Update — 2026-11-02 (independent audit):**
 - **Router Telegram alerting is live.** When `beamwarden watch` fires, the router
   itself POSTs an incident report to Telegram (no PC, no server) — mirroring
