@@ -325,7 +325,7 @@ TASK_REGISTRY: dict[str, dict] = {
     "train_detector": {
         "label": "Validate Detector (OBJ3)",
         "cmd": [
-            "python", str(_TOOLS / "train_telemetry.py"), "{csv}",
+            sys.executable, "-u", str(_TOOLS / "train_telemetry.py"), "{csv}",
         ],
         "privileged": False,
         "description": "Train + leave-one-run-out validate the RandomForest anomaly "
@@ -335,7 +335,7 @@ TASK_REGISTRY: dict[str, dict] = {
     "decode_features": {
         "label": "Decode BFI Features",
         "cmd": [
-            "python", str(_TOOLS / "bfi_features.py"),
+            sys.executable, "-u", str(_TOOLS / "bfi_features.py"),
             "--pcap", "{pcap}",
             "--out", "{out}",
         ],

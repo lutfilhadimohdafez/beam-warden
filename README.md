@@ -648,9 +648,7 @@ busy in monitor mode).
 
 ## Team
 
-Muhammad Lutfil Hadi bin Mohd Hafez · a teammate ·
-a teammate · a teammate
-Supervisor: the supervisor
+Muhammad Lutfil Hadi bin Mohd Hafez
 
 ## References
 

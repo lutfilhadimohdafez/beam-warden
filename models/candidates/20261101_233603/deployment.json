@@ -1,0 +1,7 @@
+{
+  "backup": "/root/beamwarden-candidate-20261101_234241",
+  "baseline": "0.412307 0.056427 0.005919 0.012610 26.970300 5.598162 -82.410000 1.063438",
+  "model_hash": "addd931ab7e40d82da20e81f95e28f9403c7e64699b890dd930efd62dd4de5f4",
+  "state": "rolled back: false alert during fresh normal control",
+  "failed_control": "results/sessions/normal_check_20261101_234336.json"
+}

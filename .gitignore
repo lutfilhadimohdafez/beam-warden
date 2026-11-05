@@ -27,3 +27,33 @@ tools/routers.local.json
 rig.conf
 .rig.conf
 tools/telegram.local.json
+
+# env files for the video/VO tooling (defense-in-depth)
+.env.local
+*.env.local
+
+# personal / exhibition / posters — kept locally, never in the public repo
+/CBS26-24B-Proposal*.pdf
+/4_FYP2_banner_Template.pdf
+/Beam-Warden_FYP2_Bunting_2x6.pdf
+/.flynn-mt76-adapter-spec.md
+
+# heavy media / promo / video production — kept locally, not project code
+/3dmodels/
+/beamwarden-ep1/
+/fern-voice-sample/
+/output/
+/promo-video/
+/visual-essay/
+/public-marketing-website/
+docs/fern-video-plan.md
+docs/video-ep1-script.md
+docs/video-ep1-v2.md
+
+# report artifacts removed from the public repo (kept locally)
+docs/progress-report.md
+docs/progress-reports/
+results/report_obj1_*
+results/attack_report_*
+results/beamwarden_session_report_*
+results/incident_sample.*

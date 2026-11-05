@@ -1,0 +1,37 @@
+BW_DEMO {"stage": "checking", "message": "Checking router, protected client and phone traffic server\u2026", "alert": false}
+BW_DEMO {"stage": "preparing", "message": "Requesting demo power 5.5 dBm; preparing the attack adapter\u2026"}
+BW_DEMO {"stage": "preparing", "message": "Fixed TX power is unsupported; leaving AP power unchanged (reported: 24 dBm). Learning a fresh baseline at the current power. Attack effects and alerts are not guaranteed.", "requested_power_mbm": 550, "reported_power": "24 dBm", "power_changed": false}
+BW_DEMO {"stage": "calibrating", "message": "Learning 20 seconds of normal traffic. Keep the phone still; no attack is running."}
+BW_DEMO {"stage": "preparing", "message": "Baseline saved. Preparing the adapter immediately before the experiment\u2026"}
+[23:36:32] reloading mt7921u for fresh firmware (wedged FW drops all VHT BFI)…
+[23:36:38] monitor mon0 on ch36 (phy=phy12, fresh FW)…
+BW_DEMO {"stage": "ready", "message": "Fresh baseline learned. Starting measured baseline and bounded attack bursts automatically."}
+BW_DEMO {"stage": "running", "message": "Recording 12 seconds of normal traffic, then two 12-second attack bursts. Short runs limit adapter exposure; an alert is not guaranteed.", "csv": "results/sessions/demo_20261101_233640.csv"}
+[23:36:45] mon0 hearing OK (1774 rx/2s)
+[23:36:47] iperf3 OK (28.801 Mbps probe)
+[23:36:48] phase baseline (normal) 12s…
+[23:36:56]   baseline: tx=19.9Mbps retry=0.4475209272376046 per=0.14547570555717196 rssi0=-86 mcs=6
+[23:37:00]   baseline: tx=21.4Mbps retry=0.44387036167214655 per=0.0 rssi0=-88 mcs=7
+[23:37:01] burst 1/2 (ramp) firing attack 12s…
+[23:37:01] phase attack_ramp_b1 (attack) 12s…
+[23:37:09]   attack_ramp_b1: tx=8.2Mbps retry=0.5174734662179653 per=1.5319598520866349 rssi0=-80 mcs=5
+[23:37:13]   attack_ramp_b1: tx=8.1Mbps retry=0.4955658783783784 per=1.88911704312115 rssi0=-79 mcs=4
+[23:37:14] burst 1: injections=92, 6 tput samples
+[23:37:15] burst 2/2 (SETTLED) firing attack 12s…
+[23:37:15] phase attack_settled_b2 (attack) 12s…
+[23:37:23]   attack_settled_b2: tx=8.3Mbps retry=0.5349264705882353 per=4.367912641747165 rssi0=-80 mcs=4
+[23:37:26]   attack_settled_b2: tx=6.5Mbps retry=0.6185778108711839 per=3.485633537447009 rssi0=-79 mcs=5
+[23:37:29] burst 2: injections=82, 6 tput samples
+[23:37:29] teardown…
+
+================================================================
+OBJ1 lag-aware throughput drop: 72.3%  [CLEARS >=51%]
+  baseline median : 24.6 Mbps  (n=6)
+  settled  median : 6.8 Mbps  (n=6, ramp discarded n=6)
+  retry_rate      : 0.446 -> 0.577 (delta +0.131)
+  rssi_primary    : -78.5 -> -79.5 dB (drift 1 dB)
+  injections total: 174
+CSV (labelled, OBJ3-ready): /home/lutfil/fyp/results/sessions/demo_20261101_233640.csv
+================================================================
+BW_DEMO {"stage": "finishing", "message": "Experiment finished; cleaning up the demo\u2026"}
+BW_DEMO {"stage": "complete", "message": "Run finished without a confirmed router alert. Review the charts and phone position. AP power left unchanged; detector remains running with the fresh baseline.", "alert": false, "csv": "results/sessions/demo_20261101_233640.csv"}

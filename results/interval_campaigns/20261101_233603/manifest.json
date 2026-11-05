@@ -1,0 +1,17 @@
+[
+  {
+    "csv": "run_1.csv",
+    "rows": 19,
+    "injections_reported": 174
+  },
+  {
+    "csv": "run_2.csv",
+    "rows": 16,
+    "injections_reported": 170
+  },
+  {
+    "csv": "run_3.csv",
+    "rows": 17,
+    "injections_reported": 172
+  }
+]

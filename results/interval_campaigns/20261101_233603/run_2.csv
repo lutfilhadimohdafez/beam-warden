@@ -1,0 +1,17 @@
+timestamp,feature_schema,label,condition,retry_rate,tx_failure_fraction,throughput_tx_mbps,rssi0,active_attempts
+1793547502,interval-v2,normal,baseline,0.43810,0.00000,25.034,-80.0,3869
+1793547504,interval-v2,normal,baseline,0.46828,0.00000,14.708,-79.8,2317
+1793547506,interval-v2,normal,baseline,0.33928,0.00000,31.105,-79.2,4203
+1793547508,interval-v2,normal,baseline,0.46952,0.00000,11.914,-82.2,2149
+1793547511,interval-v2,normal,baseline,0.46113,0.00000,26.295,-82.0,4194
+1793547515,interval-v2,attack,attack_ramp_b1,0.39808,0.00000,21.396,-80.0,3223
+1793547517,interval-v2,attack,attack_ramp_b1,0.27367,0.03209,14.059,-78.0,1827
+1793547519,interval-v2,attack,attack_ramp_b1,0.17607,0.00000,46.572,-79.2,4907
+1793547521,interval-v2,attack,attack_ramp_b1,0.24497,0.00000,25.082,-78.5,2784
+1793547523,interval-v2,attack,attack_ramp_b1,0.25878,0.00000,38.378,-79.2,4614
+1793547525,interval-v2,attack,attack_ramp_b1,0.32817,0.00000,12.570,-78.0,1548
+1793547529,interval-v2,attack,attack_settled_b2,0.22653,0.00000,46.201,-78.5,5103
+1793547532,interval-v2,attack,attack_settled_b2,0.24837,0.00000,26.652,-79.0,3213
+1793547534,interval-v2,attack,attack_settled_b2,0.41698,0.00000,17.743,-79.2,2650
+1793547536,interval-v2,attack,attack_settled_b2,0.29789,0.00000,24.834,-80.0,3132
+1793547538,interval-v2,attack,attack_settled_b2,0.29291,0.00175,30.817,-79.8,4032
